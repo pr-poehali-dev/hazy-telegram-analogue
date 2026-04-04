@@ -7,7 +7,6 @@ export default {
 		"./components/**/*.{ts,tsx}",
 		"./app/**/*.{ts,tsx}",
 		"./src/**/*.{ts,tsx}",
-			"./1775276173300063088.html"
 	],
 	prefix: "",
 	theme: {
@@ -19,7 +18,19 @@ export default {
 			}
 		},
 		extend: {
+			fontFamily: {
+				sans: ['Golos Text', 'system-ui', 'sans-serif'],
+			},
 			colors: {
+				hazy: {
+					amber: '#d99e6b',
+					'amber-dim': '#d99e6b33',
+					surface: '#18181c',
+					'surface-hover': '#1f1f24',
+					'surface-active': '#26262c',
+					'chat-in': '#1e1e24',
+					'chat-out': '#2a2217',
+				},
 				border: 'hsl(var(--border))',
 				input: 'hsl(var(--input))',
 				ring: 'hsl(var(--ring))',
@@ -71,25 +82,37 @@ export default {
 			},
 			keyframes: {
 				'accordion-down': {
-					from: {
-						height: '0'
-					},
-					to: {
-						height: 'var(--radix-accordion-content-height)'
-					}
+					from: { height: '0' },
+					to: { height: 'var(--radix-accordion-content-height)' }
 				},
 				'accordion-up': {
-					from: {
-						height: 'var(--radix-accordion-content-height)'
-					},
-					to: {
-						height: '0'
-					}
-				}
+					from: { height: 'var(--radix-accordion-content-height)' },
+					to: { height: '0' }
+				},
+				'fade-up': {
+					from: { opacity: '0', transform: 'translateY(8px)' },
+					to: { opacity: '1', transform: 'translateY(0)' }
+				},
+				'fade-in': {
+					from: { opacity: '0' },
+					to: { opacity: '1' }
+				},
+				'slide-left': {
+					from: { opacity: '0', transform: 'translateX(-12px)' },
+					to: { opacity: '1', transform: 'translateX(0)' }
+				},
+				'slide-right': {
+					from: { opacity: '0', transform: 'translateX(12px)' },
+					to: { opacity: '1', transform: 'translateX(0)' }
+				},
 			},
 			animation: {
 				'accordion-down': 'accordion-down 0.2s ease-out',
-				'accordion-up': 'accordion-up 0.2s ease-out'
+				'accordion-up': 'accordion-up 0.2s ease-out',
+				'fade-up': 'fade-up 0.35s ease-out both',
+				'fade-in': 'fade-in 0.3s ease-out both',
+				'slide-left': 'slide-left 0.3s ease-out both',
+				'slide-right': 'slide-right 0.3s ease-out both',
 			}
 		}
 	},
