@@ -24,6 +24,7 @@ interface ActiveSession {
   roomCode: string;
   remotePeerId: string;
   remotePeerName: string;
+  role: "creator" | "joiner";
 }
 
 function saveChatToList(code: string, peerName: string, peerId: string) {
@@ -117,6 +118,7 @@ export default function Index() {
         roomCode,
         remotePeerId: peerId,
         remotePeerName: peerName,
+        role: "creator",
       });
       setView("conversation");
     },
@@ -131,6 +133,7 @@ export default function Index() {
         roomCode: code,
         remotePeerId,
         remotePeerName,
+        role: "joiner",
       });
       setView("conversation");
       navigate("/", { replace: true });
@@ -143,6 +146,7 @@ export default function Index() {
       roomCode: chat.code,
       remotePeerId: chat.peerId,
       remotePeerName: chat.peerName,
+      role: "creator",
     });
     setView("conversation");
   }, []);
@@ -196,6 +200,7 @@ export default function Index() {
           myName={identity.name}
           remotePeerId={activeSession.remotePeerId}
           remotePeerName={activeSession.remotePeerName}
+          role={activeSession.role}
           onBack={goHome}
         />
       )}

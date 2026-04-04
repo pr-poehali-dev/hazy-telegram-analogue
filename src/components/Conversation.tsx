@@ -13,6 +13,7 @@ interface ConversationProps {
   myName: string;
   remotePeerId: string;
   remotePeerName: string;
+  role: "creator" | "joiner";
   onBack: () => void;
 }
 
@@ -22,6 +23,7 @@ export default function Conversation({
   myName,
   remotePeerId,
   remotePeerName,
+  role,
   onBack,
 }: ConversationProps) {
   const [messages, setMessages] = useState<LocalMessage[]>([]);
@@ -86,7 +88,11 @@ export default function Conversation({
       handleStatus
     );
     connRef.current = conn;
-    conn.initiate();
+    if (role === "creator") {
+      conn.initiate();
+    } else {
+      conn.waitForOffer();
+    }
 
     return () => {
       conn.destroy();

@@ -89,6 +89,11 @@ export class P2PConnection {
     this.startPolling();
   }
 
+  waitForOffer() {
+    this.onStatus("connecting");
+    this.startPolling();
+  }
+
   async handleOffer(offer: RTCSessionDescriptionInit) {
     this.onStatus("connecting");
     this.pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
