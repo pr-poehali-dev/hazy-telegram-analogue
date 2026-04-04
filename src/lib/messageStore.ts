@@ -12,6 +12,7 @@ export interface LocalMessage {
   createdAt: number;
   isEncrypted: boolean;
   deliveredVia: "p2p" | "envelope";
+  status?: "sending" | "sent" | "delivered";
 }
 
 function openDB(): Promise<IDBDatabase> {

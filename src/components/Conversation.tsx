@@ -228,11 +228,17 @@ export default function Conversation({
       createdAt: Date.now(),
       isEncrypted: false,
       deliveredVia: "p2p",
+      status: "sending",
     };
 
     addMessage(localMsg);
     setText("");
     inputRef.current?.focus();
+
+    const updateMsgStatus = (status: "sent" | "delivered") => {
+      setMessages((prev) => prev.map((m) => m.id === msgId ? { ...m, status } : m));
+      saveMessage({ ...localMsg, status }).catch(() => {});
+    };
 
     const sendViaEnvelope = async () => {
       localMsg.deliveredVia = "envelope";
@@ -245,6 +251,7 @@ export default function Conversation({
           body = await encryptMessage(trimmed, myKeys.privateKey, remotePub);
         }
         await sendEnvelope(myPeerId, myName, remotePeerId, roomCode, body);
+        updateMsgStatus("sent");
       } catch { /* skip */ }
     };
 
@@ -257,6 +264,7 @@ export default function Conversation({
           senderName: myName,
           timestamp,
         });
+        updateMsgStatus("delivered");
       } catch {
         await sendViaEnvelope();
       }
