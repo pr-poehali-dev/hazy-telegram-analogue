@@ -48,6 +48,8 @@ const ICE_SERVERS: RTCIceServer[] = [
   { urls: "stun:stun1.l.google.com:19302" },
 ];
 
+const ACK_TIMEOUT = 3000;
+
 type MsgData = { id: string; text: string; senderId: string; senderName: string; timestamp: string };
 type KeyExchangeData = { type: "key_exchange"; publicKey: string };
 type MessageHandler = (data: MsgData) => void;
@@ -70,6 +72,7 @@ export class P2PConnection {
   private destroyed = false;
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
+  private pendingAcks = new Map<string, { resolve: () => void; reject: () => void; timer: ReturnType<typeof setTimeout> }>();
 
   constructor(roomCode: string, myPeerId: string, remotePeerId: string, onMessage: MessageHandler, onKey: KeyHandler, onStatus: StatusHandler) {
     this.roomCode = roomCode;
@@ -152,11 +155,13 @@ export class P2PConnection {
     if (this.destroyed) return;
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
       this._connected = false;
+      this.rejectAllPendingAcks();
       this.onStatus("disconnected");
       return;
     }
     this.reconnectAttempts++;
     this._connected = false;
+    this.rejectAllPendingAcks();
     this.onStatus("connecting");
 
     this.stopPing();
@@ -178,6 +183,14 @@ export class P2PConnection {
     }
   }
 
+  private rejectAllPendingAcks() {
+    for (const [, pending] of this.pendingAcks) {
+      clearTimeout(pending.timer);
+      pending.reject();
+    }
+    this.pendingAcks.clear();
+  }
+
   private setupDC(dc: RTCDataChannel) {
     dc.onopen = () => {
       this._connected = true;
@@ -193,6 +206,7 @@ export class P2PConnection {
       this.stopPing();
       if (this._connected) {
         this._connected = false;
+        this.rejectAllPendingAcks();
         this.tryReconnect();
       }
     };
@@ -200,6 +214,7 @@ export class P2PConnection {
       this.stopPing();
       if (this._connected) {
         this._connected = false;
+        this.rejectAllPendingAcks();
         this.tryReconnect();
       }
     };
@@ -214,9 +229,19 @@ export class P2PConnection {
           this.lastPong = Date.now();
           return;
         }
+        if (data.type === "msg_ack" && data.id) {
+          const pending = this.pendingAcks.get(data.id);
+          if (pending) {
+            clearTimeout(pending.timer);
+            pending.resolve();
+            this.pendingAcks.delete(data.id);
+          }
+          return;
+        }
         if (data.type === "key_exchange" && data.publicKey) {
           this.onKey(data.publicKey);
-        } else {
+        } else if (data.id && data.senderId) {
+          try { dc.send(JSON.stringify({ type: "msg_ack", id: data.id })); } catch { /* skip */ }
           this.onMessage(data);
         }
       } catch { /* skip */ }
@@ -245,9 +270,22 @@ export class P2PConnection {
     if (this.pingTimer) { clearInterval(this.pingTimer); this.pingTimer = null; }
   }
 
-  send(msg: MsgData): boolean {
-    if (this.dc?.readyState === "open" && this._connected) { this.dc.send(JSON.stringify(msg)); return true; }
-    return false;
+  send(msg: MsgData): Promise<void> {
+    if (this.dc?.readyState !== "open" || !this._connected) {
+      return Promise.reject(new Error("not connected"));
+    }
+    try {
+      this.dc.send(JSON.stringify(msg));
+    } catch {
+      return Promise.reject(new Error("send failed"));
+    }
+    return new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pendingAcks.delete(msg.id);
+        reject(new Error("ack timeout"));
+      }, ACK_TIMEOUT);
+      this.pendingAcks.set(msg.id, { resolve, reject, timer });
+    });
   }
 
   private async sig(type: string, payload: unknown) {
@@ -282,6 +320,7 @@ export class P2PConnection {
   destroy() {
     this.destroyed = true;
     this.stopPing();
+    this.rejectAllPendingAcks();
     if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = null; }
     this.dc?.close(); this.dc = null;
     this.pc?.close(); this.pc = null;

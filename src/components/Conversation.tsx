@@ -230,15 +230,11 @@ export default function Conversation({
       deliveredVia: "p2p",
     };
 
-    const sentP2P = connRef.current?.connected && connRef.current.send({
-      id: msgId,
-      text: trimmed,
-      senderId: myPeerId,
-      senderName: myName,
-      timestamp,
-    });
+    addMessage(localMsg);
+    setText("");
+    inputRef.current?.focus();
 
-    if (!sentP2P) {
+    const sendViaEnvelope = async () => {
       localMsg.deliveredVia = "envelope";
       localMsg.isEncrypted = true;
       try {
@@ -249,14 +245,24 @@ export default function Conversation({
           body = await encryptMessage(trimmed, myKeys.privateKey, remotePub);
         }
         await sendEnvelope(myPeerId, myName, remotePeerId, roomCode, body);
-      } catch {
-        return;
-      }
-    }
+      } catch { /* skip */ }
+    };
 
-    addMessage(localMsg);
-    setText("");
-    inputRef.current?.focus();
+    if (connRef.current?.connected) {
+      try {
+        await connRef.current.send({
+          id: msgId,
+          text: trimmed,
+          senderId: myPeerId,
+          senderName: myName,
+          timestamp,
+        });
+      } catch {
+        await sendViaEnvelope();
+      }
+    } else {
+      await sendViaEnvelope();
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
