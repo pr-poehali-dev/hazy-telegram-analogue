@@ -55,6 +55,7 @@ type KeyExchangeData = { type: "key_exchange"; publicKey: string };
 type MessageHandler = (data: MsgData) => void;
 type KeyHandler = (publicKey: string) => void;
 type StatusHandler = (status: "connecting" | "connected" | "disconnected") => void;
+type ReadAckHandler = (ids: string[]) => void;
 
 export class P2PConnection {
   private pc: RTCPeerConnection | null = null;
@@ -65,6 +66,7 @@ export class P2PConnection {
   private onMessage: MessageHandler;
   private onKey: KeyHandler;
   private onStatus: StatusHandler;
+  private onReadAck: ReadAckHandler;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private _connected = false;
   private myPublicKey: string | null = null;
@@ -74,13 +76,14 @@ export class P2PConnection {
   private maxReconnectAttempts = 5;
   private pendingAcks = new Map<string, { resolve: () => void; reject: () => void; timer: ReturnType<typeof setTimeout> }>();
 
-  constructor(roomCode: string, myPeerId: string, remotePeerId: string, onMessage: MessageHandler, onKey: KeyHandler, onStatus: StatusHandler) {
+  constructor(roomCode: string, myPeerId: string, remotePeerId: string, onMessage: MessageHandler, onKey: KeyHandler, onStatus: StatusHandler, onReadAck?: ReadAckHandler) {
     this.roomCode = roomCode;
     this.myPeerId = myPeerId;
     this.remotePeerId = remotePeerId;
     this.onMessage = onMessage;
     this.onKey = onKey;
     this.onStatus = onStatus;
+    this.onReadAck = onReadAck || (() => {});
   }
 
   get connected() { return this._connected; }
@@ -238,6 +241,10 @@ export class P2PConnection {
           }
           return;
         }
+        if (data.type === "read_ack" && Array.isArray(data.ids)) {
+          this.onReadAck(data.ids);
+          return;
+        }
         if (data.type === "key_exchange" && data.publicKey) {
           this.onKey(data.publicKey);
         } else if (data.id && data.senderId) {
@@ -268,6 +275,13 @@ export class P2PConnection {
 
   private stopPing() {
     if (this.pingTimer) { clearInterval(this.pingTimer); this.pingTimer = null; }
+  }
+
+  sendReadAck(ids: string[]) {
+    if (ids.length === 0) return;
+    if (this.dc?.readyState === "open" && this._connected) {
+      try { this.dc.send(JSON.stringify({ type: "read_ack", ids })); } catch { /* skip */ }
+    }
   }
 
   send(msg: MsgData): Promise<void> {

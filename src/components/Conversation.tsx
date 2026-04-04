@@ -130,6 +130,7 @@ export default function Conversation({
           isEncrypted: false,
           deliveredVia: "p2p",
         });
+        connRef.current?.sendReadAck([data.id]);
       },
       (pubKey) => {
         saveRemotePublicKey(remotePeerId, pubKey);
@@ -137,12 +138,32 @@ export default function Conversation({
       },
       (status) => {
         setP2pStatus(status);
+        if (status === "connected") {
+          setMessages((prev) => {
+            const remoteIds = prev.filter((m) => m.senderId !== myPeerId).map((m) => m.id);
+            if (remoteIds.length > 0) connRef.current?.sendReadAck(remoteIds);
+            return prev;
+          });
+        }
         if (status === "disconnected") {
           if (reconnectRef.current) clearTimeout(reconnectRef.current);
           reconnectRef.current = setTimeout(() => {
             setupConnection();
           }, 3000);
         }
+      },
+      (readIds) => {
+        setMessages((prev) => {
+          const updated = prev.map((m) => {
+            if (readIds.includes(m.id) && m.status !== "read") {
+              const r = { ...m, status: "read" as const };
+              saveMessage(r).catch(() => {});
+              return r;
+            }
+            return m;
+          });
+          return updated;
+        });
       }
     );
     connRef.current = conn;
@@ -367,12 +388,14 @@ export default function Conversation({
                     {msg.text}
                   </p>
                   <div className="flex items-center justify-end gap-1 mt-0.5">
-                    {msg.deliveredVia === "envelope" && (
-                      <Icon name="Cloud" size={8} className="text-muted-foreground/40" />
-                    )}
-                    <p className={`text-[10px] ${isMine ? "text-muted-foreground/50" : "text-muted-foreground/50"}`}>
+                    <p className="text-[10px] text-muted-foreground/50">
                       {formatTime(msg.timestamp)}
                     </p>
+                    {isMine && (
+                      <span className={`text-[10px] leading-none ${msg.status === "read" ? "text-[var(--hazy-amber)]" : "text-muted-foreground/40"}`}>
+                        {msg.status === "read" ? "✓✓" : "✓"}
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>
