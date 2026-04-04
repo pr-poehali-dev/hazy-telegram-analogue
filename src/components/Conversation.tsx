@@ -60,6 +60,7 @@ export default function Conversation({
   const inputRef = useRef<HTMLInputElement>(null);
   const envelopePollRef = useRef<ReturnType<typeof setInterval>>();
   const reconnectRef = useRef<ReturnType<typeof setTimeout>>();
+  const remoteActiveTimer = useRef<ReturnType<typeof setTimeout>>();
   const msgIdsRef = useRef<Set<string>>(new Set());
   const myKeysRef = useRef<{ publicKey: string; privateKey: string } | null>(null);
   const [remotePublicKey, setRemotePublicKey] = useState<string | null>(() => getRemotePublicKey(remotePeerId));
@@ -184,6 +185,7 @@ export default function Conversation({
     return () => {
       if (connRef.current) connRef.current.destroy();
       if (reconnectRef.current) clearTimeout(reconnectRef.current);
+      if (remoteActiveTimer.current) clearTimeout(remoteActiveTimer.current);
       connRef.current = null;
     };
   }, [setupConnection]);
@@ -194,6 +196,7 @@ export default function Conversation({
         const envelopes = await fetchEnvelopes(myPeerId);
         if (envelopes.length === 0) return;
         const ackIds: string[] = [];
+        const readAckIds: string[] = [];
         const remotePub = getRemotePublicKey(remotePeerId);
         const myKeys = myKeysRef.current;
         for (const env of envelopes) {
@@ -212,8 +215,27 @@ export default function Conversation({
           ackIds.push(env.id);
           if (env.from_peer_id === remotePeerId) {
             const age = Date.now() - safeTs(env.created_at);
-            if (age < 30000) setRemoteActive(true);
+            if (age < 30000) {
+              setRemoteActive(true);
+              if (remoteActiveTimer.current) clearTimeout(remoteActiveTimer.current);
+              remoteActiveTimer.current = setTimeout(() => setRemoteActive(false), 10000);
+            }
           }
+          if (plainText.startsWith("__read_ack:")) {
+            const readIds = plainText.slice(11).split(",");
+            setMessages((prev) => {
+              return prev.map((m) => {
+                if (readIds.includes(m.id) && m.status !== "read") {
+                  const r = { ...m, status: "read" as const };
+                  saveMessage(r).catch(() => {});
+                  return r;
+                }
+                return m;
+              });
+            });
+            continue;
+          }
+          if (env.from_peer_id === remotePeerId) readAckIds.push(env.id);
           addMessage({
             id: env.id,
             chatId: roomCode,
@@ -227,6 +249,10 @@ export default function Conversation({
           });
         }
         if (ackIds.length > 0) await ackEnvelopes(myPeerId, ackIds);
+        if (readAckIds.length > 0) {
+          const ackBody = "__read_ack:" + readAckIds.join(",");
+          sendEnvelope(myPeerId, myName, remotePeerId, roomCode, ackBody).catch(() => {});
+        }
       } catch { /* skip */ }
     };
     checkEnvelopes();
