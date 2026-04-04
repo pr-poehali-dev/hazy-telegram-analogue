@@ -266,16 +266,12 @@ export default function Conversation({
   const statusColor =
     p2pStatus === "connected"
       ? "bg-green-500"
-      : p2pStatus === "connecting"
-        ? "bg-yellow-500"
-        : "bg-red-500";
+      : "bg-gray-400";
 
   const statusLabel =
     p2pStatus === "connected"
-      ? "P2P"
-      : p2pStatus === "connecting"
-        ? "Соединение..."
-        : "Через сервер";
+      ? "онлайн"
+      : "офлайн";
 
   const formatTime = (ts: string) => {
     if (!ts) return "";
