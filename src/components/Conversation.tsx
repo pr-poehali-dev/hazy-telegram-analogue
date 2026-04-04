@@ -54,6 +54,7 @@ export default function Conversation({
   const [p2pStatus, setP2pStatus] = useState<
     "connecting" | "connected" | "disconnected"
   >("connecting");
+  const [remoteActive, setRemoteActive] = useState(false);
   const connRef = useRef<P2PConnection | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -209,6 +210,10 @@ export default function Conversation({
             if (!decrypted) continue;
           }
           ackIds.push(env.id);
+          if (env.from_peer_id === remotePeerId) {
+            const age = Date.now() - safeTs(env.created_at);
+            if (age < 30000) setRemoteActive(true);
+          }
           addMessage({
             id: env.id,
             chatId: roomCode,
@@ -302,15 +307,10 @@ export default function Conversation({
     }
   };
 
-  const statusColor =
-    p2pStatus === "connected"
-      ? "bg-green-500"
-      : "bg-gray-400";
+  const isOnline = p2pStatus === "connected" || remoteActive;
 
-  const statusLabel =
-    p2pStatus === "connected"
-      ? "онлайн"
-      : "офлайн";
+  const statusColor = isOnline ? "bg-green-500" : "bg-gray-400";
+  const statusLabel = isOnline ? "онлайн" : "оффлайн";
 
   const formatTime = (ts: string) => {
     if (!ts) return "";
@@ -345,10 +345,7 @@ export default function Conversation({
         <div className="flex-1 min-w-0">
           <p className="text-sm font-medium text-foreground truncate">{remotePeerName}</p>
           <div className="flex items-center gap-1.5 mt-0.5">
-            <div
-              className={`w-1.5 h-1.5 rounded-full ${statusColor}`}
-              style={p2pStatus === "connecting" ? { animation: "pulse-soft 1.5s ease-in-out infinite" } : undefined}
-            />
+            <div className={`w-1.5 h-1.5 rounded-full ${statusColor}`} />
             <span className="text-[11px] text-muted-foreground">{statusLabel}</span>
           </div>
         </div>
