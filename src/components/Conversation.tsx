@@ -69,6 +69,29 @@ export default function Conversation({
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, []);
 
+  const markAsRead = useCallback((readIds: string[]) => {
+    if (readIds.length === 0) return;
+    setMessages((prev) => {
+      const readSet = new Set(readIds);
+      let latestReadIdx = -1;
+      for (let i = prev.length - 1; i >= 0; i--) {
+        if (readSet.has(prev[i].id) && prev[i].senderId === myPeerId) {
+          latestReadIdx = i;
+          break;
+        }
+      }
+      if (latestReadIdx === -1) return prev;
+      return prev.map((m, i) => {
+        if (m.senderId === myPeerId && i <= latestReadIdx && m.status !== "read") {
+          const r = { ...m, status: "read" as const };
+          saveMessage(r).catch(() => {});
+          return r;
+        }
+        return m;
+      });
+    });
+  }, [myPeerId]);
+
   const addMessage = useCallback((msg: LocalMessage) => {
     if (msgIdsRef.current.has(msg.id)) return;
     msgIdsRef.current.add(msg.id);
@@ -155,17 +178,7 @@ export default function Conversation({
         }
       },
       (readIds) => {
-        setMessages((prev) => {
-          const updated = prev.map((m) => {
-            if (readIds.includes(m.id) && m.status !== "read") {
-              const r = { ...m, status: "read" as const };
-              saveMessage(r).catch(() => {});
-              return r;
-            }
-            return m;
-          });
-          return updated;
-        });
+        markAsRead(readIds);
       }
     );
     connRef.current = conn;
@@ -178,7 +191,7 @@ export default function Conversation({
     } else {
       conn.waitForOffer();
     }
-  }, [roomCode, myPeerId, remotePeerId, addMessage]);
+  }, [roomCode, myPeerId, remotePeerId, addMessage, markAsRead]);
 
   useEffect(() => {
     setupConnection();
@@ -223,16 +236,7 @@ export default function Conversation({
           }
           if (plainText.startsWith("__read_ack:")) {
             const readIds = plainText.slice(11).split(",");
-            setMessages((prev) => {
-              return prev.map((m) => {
-                if (readIds.includes(m.id) && m.status !== "read") {
-                  const r = { ...m, status: "read" as const };
-                  saveMessage(r).catch(() => {});
-                  return r;
-                }
-                return m;
-              });
-            });
+            markAsRead(readIds);
             continue;
           }
           if (env.from_peer_id === remotePeerId) readAckIds.push(env.id);
