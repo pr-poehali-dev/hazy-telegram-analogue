@@ -133,12 +133,11 @@ export class P2PConnection {
     try {
       const signals = await pollSignals(this.myPeerId, this.roomCode);
       for (const s of signals) {
-        if (!this.pc) continue;
-        if (s.signal_type === "offer" && !this.dc) {
+        if (s.signal_type === "offer") {
           await this.handleOffer(s.payload as RTCSessionDescriptionInit);
-        } else if (s.signal_type === "answer") {
+        } else if (s.signal_type === "answer" && this.pc) {
           await this.pc.setRemoteDescription(new RTCSessionDescription(s.payload as RTCSessionDescriptionInit));
-        } else if (s.signal_type === "ice-candidate" && s.payload) {
+        } else if (s.signal_type === "ice-candidate" && s.payload && this.pc) {
           await this.pc.addIceCandidate(new RTCIceCandidate(s.payload as RTCIceCandidateInit));
         }
       }
