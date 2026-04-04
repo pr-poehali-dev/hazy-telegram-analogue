@@ -46,27 +46,6 @@ export async function pollSignals(peerId: string, code?: string) {
 const ICE_SERVERS: RTCIceServer[] = [
   { urls: "stun:stun.l.google.com:19302" },
   { urls: "stun:stun1.l.google.com:19302" },
-  { urls: "stun:stun.relay.metered.ca:80" },
-  {
-    urls: "turn:global.relay.metered.ca:80",
-    username: "e00e36a4f3e4b743e2b0ecdd",
-    credential: "kMOANa4K/cIDRVaR",
-  },
-  {
-    urls: "turn:global.relay.metered.ca:80?transport=tcp",
-    username: "e00e36a4f3e4b743e2b0ecdd",
-    credential: "kMOANa4K/cIDRVaR",
-  },
-  {
-    urls: "turn:global.relay.metered.ca:443",
-    username: "e00e36a4f3e4b743e2b0ecdd",
-    credential: "kMOANa4K/cIDRVaR",
-  },
-  {
-    urls: "turns:global.relay.metered.ca:443?transport=tcp",
-    username: "e00e36a4f3e4b743e2b0ecdd",
-    credential: "kMOANa4K/cIDRVaR",
-  },
 ];
 
 type MsgData = { id: string; text: string; senderId: string; senderName: string; timestamp: string };
@@ -87,6 +66,10 @@ export class P2PConnection {
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private _connected = false;
   private myPublicKey: string | null = null;
+  private isInitiator = false;
+  private destroyed = false;
+  private reconnectAttempts = 0;
+  private maxReconnectAttempts = 5;
 
   constructor(roomCode: string, myPeerId: string, remotePeerId: string, onMessage: MessageHandler, onKey: KeyHandler, onStatus: StatusHandler) {
     this.roomCode = roomCode;
@@ -100,39 +83,33 @@ export class P2PConnection {
   get connected() { return this._connected; }
 
   async initiate() {
+    this.isInitiator = true;
     this.onStatus("connecting");
-    this.pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
-    this.dc = this.pc.createDataChannel("hazy", { ordered: true });
+    this.createPC();
+    this.dc = this.pc!.createDataChannel("hazy", { ordered: true });
     this.setupDC(this.dc);
 
-    this.pc.onicecandidate = (e) => {
-      if (e.candidate) this.sig("ice-candidate", e.candidate.toJSON());
-    };
-
-    const offer = await this.pc.createOffer();
-    await this.pc.setLocalDescription(offer);
+    const offer = await this.pc!.createOffer();
+    await this.pc!.setLocalDescription(offer);
     await this.sig("offer", { sdp: offer.sdp, type: offer.type });
     this.startPolling();
   }
 
   waitForOffer() {
+    this.isInitiator = false;
     this.onStatus("connecting");
     this.startPolling();
   }
 
   async handleOffer(offer: RTCSessionDescriptionInit) {
     this.onStatus("connecting");
-    this.pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
-    this.pc.ondatachannel = (e) => { this.dc = e.channel; this.setupDC(this.dc); };
-    this.pc.onicecandidate = (e) => {
-      if (e.candidate) this.sig("ice-candidate", e.candidate.toJSON());
-    };
+    this.createPC();
+    this.pc!.ondatachannel = (e) => { this.dc = e.channel; this.setupDC(this.dc); };
 
-    await this.pc.setRemoteDescription(new RTCSessionDescription(offer));
-    const answer = await this.pc.createAnswer();
-    await this.pc.setLocalDescription(answer);
+    await this.pc!.setRemoteDescription(new RTCSessionDescription(offer));
+    const answer = await this.pc!.createAnswer();
+    await this.pc!.setLocalDescription(answer);
     await this.sig("answer", { sdp: answer.sdp, type: answer.type });
-    this.startPolling();
   }
 
   setMyPublicKey(key: string) {
@@ -145,10 +122,67 @@ export class P2PConnection {
   private pingTimer: ReturnType<typeof setInterval> | null = null;
   private lastPong = 0;
 
+  private createPC() {
+    if (this.pc) { this.pc.close(); }
+    this.pc = new RTCPeerConnection({ iceServers: ICE_SERVERS, iceCandidatePoolSize: 2 });
+
+    this.pc.onicecandidate = (e) => {
+      if (e.candidate) this.sig("ice-candidate", e.candidate.toJSON());
+    };
+
+    this.pc.oniceconnectionstatechange = () => {
+      const state = this.pc?.iceConnectionState;
+      if (state === "connected" || state === "completed") {
+        this.reconnectAttempts = 0;
+      }
+      if (state === "failed") {
+        this.tryReconnect();
+      }
+      if (state === "disconnected") {
+        setTimeout(() => {
+          if (this.pc?.iceConnectionState === "disconnected") {
+            this.tryReconnect();
+          }
+        }, 3000);
+      }
+    };
+  }
+
+  private async tryReconnect() {
+    if (this.destroyed) return;
+    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      this._connected = false;
+      this.onStatus("disconnected");
+      return;
+    }
+    this.reconnectAttempts++;
+    this._connected = false;
+    this.onStatus("connecting");
+
+    this.stopPing();
+    this.dc?.close();
+    this.dc = null;
+    this.pc?.close();
+    this.pc = null;
+
+    await new Promise((r) => setTimeout(r, 1000 * this.reconnectAttempts));
+    if (this.destroyed) return;
+
+    if (this.isInitiator) {
+      this.createPC();
+      this.dc = this.pc!.createDataChannel("hazy", { ordered: true });
+      this.setupDC(this.dc);
+      const offer = await this.pc!.createOffer();
+      await this.pc!.setLocalDescription(offer);
+      await this.sig("offer", { sdp: offer.sdp, type: offer.type });
+    }
+  }
+
   private setupDC(dc: RTCDataChannel) {
     dc.onopen = () => {
       this._connected = true;
       this.lastPong = Date.now();
+      this.reconnectAttempts = 0;
       this.onStatus("connected");
       if (this.myPublicKey) {
         dc.send(JSON.stringify({ type: "key_exchange", publicKey: this.myPublicKey } as KeyExchangeData));
@@ -157,13 +191,17 @@ export class P2PConnection {
     };
     dc.onclose = () => {
       this.stopPing();
-      this._connected = false;
-      this.onStatus("disconnected");
+      if (this._connected) {
+        this._connected = false;
+        this.tryReconnect();
+      }
     };
     dc.onerror = () => {
       this.stopPing();
-      this._connected = false;
-      this.onStatus("disconnected");
+      if (this._connected) {
+        this._connected = false;
+        this.tryReconnect();
+      }
     };
     dc.onmessage = (e) => {
       try {
@@ -192,13 +230,13 @@ export class P2PConnection {
         try { this.dc.send(JSON.stringify({ type: "ping" })); } catch { /* skip */ }
         if (Date.now() - this.lastPong > 20000) {
           this._connected = false;
-          this.onStatus("disconnected");
           this.stopPing();
+          this.tryReconnect();
         }
       } else if (this.dc?.readyState === "closed") {
         this._connected = false;
-        this.onStatus("disconnected");
         this.stopPing();
+        this.tryReconnect();
       }
     }, 5000);
   }
@@ -222,21 +260,27 @@ export class P2PConnection {
   }
 
   private async poll() {
+    if (this.destroyed) return;
     try {
       const signals = await pollSignals(this.myPeerId, this.roomCode);
       for (const s of signals) {
         if (s.signal_type === "offer") {
           await this.handleOffer(s.payload as RTCSessionDescriptionInit);
         } else if (s.signal_type === "answer" && this.pc) {
-          await this.pc.setRemoteDescription(new RTCSessionDescription(s.payload as RTCSessionDescriptionInit));
+          if (this.pc.signalingState === "have-local-offer") {
+            await this.pc.setRemoteDescription(new RTCSessionDescription(s.payload as RTCSessionDescriptionInit));
+          }
         } else if (s.signal_type === "ice-candidate" && s.payload && this.pc) {
-          await this.pc.addIceCandidate(new RTCIceCandidate(s.payload as RTCIceCandidateInit));
+          if (this.pc.remoteDescription) {
+            await this.pc.addIceCandidate(new RTCIceCandidate(s.payload as RTCIceCandidateInit));
+          }
         }
       }
     } catch { /* skip */ }
   }
 
   destroy() {
+    this.destroyed = true;
     this.stopPing();
     if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = null; }
     this.dc?.close(); this.dc = null;
