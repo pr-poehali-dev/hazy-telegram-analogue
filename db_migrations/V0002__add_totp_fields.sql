@@ -1,0 +1,3 @@
+
+ALTER TABLE users ADD COLUMN totp_secret VARCHAR(64);
+ALTER TABLE users ADD COLUMN is_2fa_enabled BOOLEAN DEFAULT false;

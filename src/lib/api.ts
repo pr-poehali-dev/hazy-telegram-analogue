@@ -46,19 +46,33 @@ async function request(url: string, options: RequestInit = {}) {
 }
 
 export async function register(username: string, displayName: string, password: string) {
-  const data = await request(`${AUTH_URL}?action=register`, {
+  return request(`${AUTH_URL}?action=register`, {
     method: "POST",
     body: JSON.stringify({ username, display_name: displayName, password, public_key: "" }),
+  });
+}
+
+export async function login(username: string, password: string) {
+  return request(`${AUTH_URL}?action=login`, {
+    method: "POST",
+    body: JSON.stringify({ username, password }),
+  });
+}
+
+export async function verify2faSetup(userId: string, code: string) {
+  const data = await request(`${AUTH_URL}?action=verify_2fa_setup`, {
+    method: "POST",
+    body: JSON.stringify({ user_id: userId, code }),
   });
   setToken(data.token);
   setUser(data);
   return data;
 }
 
-export async function login(username: string, password: string) {
-  const data = await request(`${AUTH_URL}?action=login`, {
+export async function verify2fa(userId: string, code: string) {
+  const data = await request(`${AUTH_URL}?action=verify_2fa`, {
     method: "POST",
-    body: JSON.stringify({ username, password }),
+    body: JSON.stringify({ user_id: userId, code }),
   });
   setToken(data.token);
   setUser(data);
