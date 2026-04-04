@@ -1,33 +1,35 @@
 import { useState } from "react";
 import Icon from "@/components/ui/icon";
-import { Chat } from "@/types/chat";
+
+interface ApiChat {
+  id: string;
+  participant: {
+    id: string;
+    name: string;
+    username: string;
+    status: string;
+    lastSeen: string | null;
+  };
+  unreadCount: number;
+  lastMessageAt: string;
+  hasMessages: boolean;
+}
 
 interface ChatListProps {
-  chats: Chat[];
-  onSelectChat: (chat: Chat) => void;
+  chats: ApiChat[];
+  loading: boolean;
+  onSelectChat: (chat: ApiChat) => void;
   onNewChat: () => void;
   onProfile: () => void;
 }
 
-const categories = [
-  { key: "all", label: "Все" },
-  { key: "personal", label: "Личные" },
-  { key: "work", label: "Работа" },
-  { key: "groups", label: "Группы" },
-] as const;
-
-export default function ChatList({ chats, onSelectChat, onNewChat, onProfile }: ChatListProps) {
+export default function ChatList({ chats, loading, onSelectChat, onNewChat, onProfile }: ChatListProps) {
   const [search, setSearch] = useState("");
-  const [activeCategory, setActiveCategory] = useState<string>("all");
 
-  const filtered = chats.filter((c) => {
-    const matchName = c.participant.name.toLowerCase().includes(search.toLowerCase());
-    const matchCat = activeCategory === "all" || c.category === activeCategory;
-    return matchName && matchCat;
-  });
-
-  const pinned = filtered.filter((c) => c.isPinned);
-  const regular = filtered.filter((c) => !c.isPinned);
+  const filtered = chats.filter((c) =>
+    c.participant.name.toLowerCase().includes(search.toLowerCase()) ||
+    c.participant.username.toLowerCase().includes(search.toLowerCase())
+  );
 
   return (
     <div className="flex flex-col h-full">
@@ -62,49 +64,29 @@ export default function ChatList({ chats, onSelectChat, onNewChat, onProfile }: 
         </div>
       </div>
 
-      <div className="px-4 pb-2 flex gap-1.5">
-        {categories.map((cat) => (
-          <button
-            key={cat.key}
-            onClick={() => setActiveCategory(cat.key)}
-            className={`px-3 py-1 rounded-lg text-xs font-medium transition-all ${
-              activeCategory === cat.key
-                ? "bg-[var(--hazy-amber)] text-[#111]"
-                : "bg-[var(--hazy-surface)] text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            {cat.label}
-          </button>
-        ))}
-      </div>
-
       <div className="flex-1 overflow-y-auto scrollbar-thin">
-        {pinned.length > 0 && (
-          <div className="px-4 py-1.5">
-            <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
-              Закреплённые
-            </span>
+        {loading && (
+          <div className="flex items-center justify-center py-20">
+            <div className="w-5 h-5 border-2 border-[var(--hazy-amber)] border-t-transparent rounded-full animate-spin" />
           </div>
         )}
-        {pinned.map((chat, i) => (
+
+        {!loading && filtered.map((chat, i) => (
           <ChatRow key={chat.id} chat={chat} onClick={() => onSelectChat(chat)} delay={i * 30} />
         ))}
 
-        {regular.length > 0 && pinned.length > 0 && (
-          <div className="px-4 py-1.5 mt-1">
-            <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
-              Все чаты
-            </span>
-          </div>
-        )}
-        {regular.map((chat, i) => (
-          <ChatRow key={chat.id} chat={chat} onClick={() => onSelectChat(chat)} delay={(pinned.length + i) * 30} />
-        ))}
-
-        {filtered.length === 0 && (
+        {!loading && filtered.length === 0 && (
           <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
             <Icon name="MessageSquare" size={32} className="mb-3 opacity-30" />
-            <p className="text-sm">Ничего не найдено</p>
+            <p className="text-sm">{chats.length === 0 ? "Нет чатов" : "Ничего не найдено"}</p>
+            {chats.length === 0 && (
+              <button
+                onClick={onNewChat}
+                className="mt-3 px-4 py-2 rounded-xl bg-[var(--hazy-amber)] text-[#111] text-xs font-medium"
+              >
+                Начать чат
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -112,10 +94,9 @@ export default function ChatList({ chats, onSelectChat, onNewChat, onProfile }: 
   );
 }
 
-function ChatRow({ chat, onClick, delay }: { chat: Chat; onClick: () => void; delay: number }) {
+function ChatRow({ chat, onClick, delay }: { chat: { id: string; participant: { name: string; status: string }; unreadCount: number; lastMessageAt: string }; onClick: () => void; delay: number }) {
   const statusColor =
-    chat.participant.status === "online" ? "#4ade80" :
-    chat.participant.status === "recently" ? "#d99e6b" : "#555";
+    chat.participant.status === "online" ? "#4ade80" : "#555";
 
   const initials = chat.participant.name
     .split(" ")
@@ -123,6 +104,19 @@ function ChatRow({ chat, onClick, delay }: { chat: Chat; onClick: () => void; de
     .join("")
     .slice(0, 2)
     .toUpperCase();
+
+  const timeStr = (() => {
+    try {
+      const d = new Date(chat.lastMessageAt);
+      const now = new Date();
+      if (d.toDateString() === now.toDateString()) {
+        return d.toLocaleTimeString("ru", { hour: "2-digit", minute: "2-digit" });
+      }
+      return d.toLocaleDateString("ru", { day: "numeric", month: "short" });
+    } catch {
+      return "";
+    }
+  })();
 
   return (
     <button
@@ -143,27 +137,18 @@ function ChatRow({ chat, onClick, delay }: { chat: Chat; onClick: () => void; de
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between">
           <span className="text-sm font-medium truncate">{chat.participant.name}</span>
-          <span className="text-[11px] text-muted-foreground ml-2 flex-shrink-0">
-            {chat.lastMessage?.timestamp}
-          </span>
+          <span className="text-[11px] text-muted-foreground ml-2 flex-shrink-0">{timeStr}</span>
         </div>
         <div className="flex items-center justify-between mt-0.5">
           <p className="text-xs text-muted-foreground truncate pr-2">
-            {chat.lastMessage?.senderId === "me" && (
-              <span className="text-[var(--hazy-amber)] opacity-70 mr-1">Вы:</span>
-            )}
-            {chat.lastMessage?.text}
+            <Icon name="Lock" size={10} className="text-[var(--hazy-amber)] opacity-40 inline mr-1" />
+            Зашифрованный чат
           </p>
-          <div className="flex items-center gap-1.5 flex-shrink-0">
-            {chat.lastMessage?.isEncrypted && (
-              <Icon name="Lock" size={10} className="text-[var(--hazy-amber)] opacity-40" />
-            )}
-            {chat.unreadCount > 0 && (
-              <span className="min-w-[18px] h-[18px] rounded-full bg-[var(--hazy-amber)] text-[#111] text-[10px] font-bold flex items-center justify-center px-1">
-                {chat.unreadCount}
-              </span>
-            )}
-          </div>
+          {chat.unreadCount > 0 && (
+            <span className="min-w-[18px] h-[18px] rounded-full bg-[var(--hazy-amber)] text-[#111] text-[10px] font-bold flex items-center justify-center px-1">
+              {chat.unreadCount}
+            </span>
+          )}
         </div>
       </div>
     </button>

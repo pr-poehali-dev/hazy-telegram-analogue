@@ -1,43 +1,74 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import Icon from "@/components/ui/icon";
-import { Chat, Message } from "@/types/chat";
-import { chatMessages } from "@/data/mockData";
+import { getMessages, sendMessage, markRead } from "@/lib/api";
+
+interface ApiMessage {
+  id: string;
+  chat_id: string;
+  sender_id: string;
+  sender_name: string;
+  text: string;
+  is_read: boolean;
+  is_encrypted: boolean;
+  timestamp: string;
+}
 
 interface ConversationProps {
-  chat: Chat;
+  chatId: string;
+  participantName: string;
+  participantStatus: string;
+  currentUserId: string;
   onBack: () => void;
 }
 
-export default function Conversation({ chat, onBack }: ConversationProps) {
-  const [messages, setMessages] = useState<Message[]>(chatMessages[chat.id] || []);
+export default function Conversation({ chatId, participantName, participantStatus, currentUserId, onBack }: ConversationProps) {
+  const [messages, setMessages] = useState<ApiMessage[]>([]);
   const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [sending, setSending] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval>>();
+
+  const loadMessages = useCallback(async () => {
+    try {
+      const msgs = await getMessages(chatId);
+      setMessages(msgs);
+    } catch {
+      // ignore
+    } finally {
+      setLoading(false);
+    }
+  }, [chatId]);
+
+  useEffect(() => {
+    loadMessages();
+    markRead(chatId).catch(() => {});
+    pollRef.current = setInterval(loadMessages, 3000);
+    return () => clearInterval(pollRef.current);
+  }, [chatId, loadMessages]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const send = () => {
-    if (!input.trim()) return;
-    const msg: Message = {
-      id: `m-${Date.now()}`,
-      chatId: chat.id,
-      senderId: "me",
-      text: input.trim(),
-      timestamp: new Date().toLocaleTimeString("ru", { hour: "2-digit", minute: "2-digit" }),
-      isRead: false,
-      isEncrypted: true,
-    };
-    setMessages((prev) => [...prev, msg]);
+  const send = async () => {
+    if (!input.trim() || sending) return;
+    const text = input.trim();
     setInput("");
+    setSending(true);
+    try {
+      const msg = await sendMessage(chatId, text);
+      setMessages((prev) => [...prev, { ...msg, sender_name: "Вы", is_read: false, is_encrypted: true }]);
+    } catch {
+      setInput(text);
+    } finally {
+      setSending(false);
+    }
   };
 
-  const statusText =
-    chat.participant.status === "online"
-      ? "в сети"
-      : chat.participant.lastSeen || "не в сети";
+  const statusText = participantStatus === "online" ? "в сети" : "не в сети";
 
-  const initials = chat.participant.name
+  const initials = participantName
     .split(" ")
     .map((w) => w[0])
     .join("")
@@ -49,13 +80,7 @@ export default function Conversation({ chat, onBack }: ConversationProps) {
       <div className="flex items-center gap-3 px-3 py-3 border-b border-border/50 bg-[var(--hazy-surface)]/60 backdrop-blur-sm">
         <button
           onClick={onBack}
-          className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-[var(--hazy-surface-hover)] transition-colors md:hidden"
-        >
-          <Icon name="ArrowLeft" size={18} />
-        </button>
-        <button
-          onClick={onBack}
-          className="w-8 h-8 rounded-full items-center justify-center hover:bg-[var(--hazy-surface-hover)] transition-colors hidden md:flex"
+          className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-[var(--hazy-surface-hover)] transition-colors"
         >
           <Icon name="ArrowLeft" size={18} />
         </button>
@@ -65,35 +90,49 @@ export default function Conversation({ chat, onBack }: ConversationProps) {
         </div>
 
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium truncate">{chat.participant.name}</p>
+          <p className="text-sm font-medium truncate">{participantName}</p>
           <p className="text-[11px] text-muted-foreground flex items-center gap-1">
-            {chat.participant.status === "online" && (
+            {participantStatus === "online" && (
               <span className="w-1.5 h-1.5 rounded-full bg-green-400 inline-block" />
             )}
             {statusText}
           </p>
         </div>
 
-        <div className="flex items-center gap-1 text-muted-foreground">
-          <div className="flex items-center gap-1 px-2 py-1 rounded-lg bg-[var(--hazy-amber-dim)]">
-            <Icon name="ShieldCheck" size={12} className="text-[var(--hazy-amber)]" />
-            <span className="text-[10px] text-[var(--hazy-amber)] font-medium">E2E</span>
-          </div>
+        <div className="flex items-center gap-1 px-2 py-1 rounded-lg bg-[var(--hazy-amber-dim)]">
+          <Icon name="ShieldCheck" size={12} className="text-[var(--hazy-amber)]" />
+          <span className="text-[10px] text-[var(--hazy-amber)] font-medium">E2E</span>
         </div>
       </div>
 
       <div className="flex-1 overflow-y-auto scrollbar-thin px-4 py-4 space-y-1.5">
+        {loading && (
+          <div className="flex items-center justify-center py-20">
+            <div className="w-5 h-5 border-2 border-[var(--hazy-amber)] border-t-transparent rounded-full animate-spin" />
+          </div>
+        )}
+
+        {!loading && messages.length === 0 && (
+          <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
+            <Icon name="Lock" size={24} className="mb-3 text-[var(--hazy-amber)] opacity-40" />
+            <p className="text-sm">Чат зашифрован E2E</p>
+            <p className="text-xs mt-1 opacity-60">Напишите первое сообщение</p>
+          </div>
+        )}
+
         {messages.map((msg, i) => (
-          <MessageBubble key={msg.id} message={msg} delay={i * 20} />
+          <MessageBubble
+            key={msg.id}
+            message={msg}
+            isMine={msg.sender_id === currentUserId}
+            delay={i * 15}
+          />
         ))}
         <div ref={bottomRef} />
       </div>
 
       <div className="px-3 py-3 border-t border-border/30">
         <div className="flex items-end gap-2">
-          <button className="w-9 h-9 rounded-full flex items-center justify-center hover:bg-[var(--hazy-surface-hover)] transition-colors text-muted-foreground flex-shrink-0">
-            <Icon name="Paperclip" size={18} />
-          </button>
           <div className="flex-1 relative">
             <textarea
               value={input}
@@ -111,7 +150,7 @@ export default function Conversation({ chat, onBack }: ConversationProps) {
           </div>
           <button
             onClick={send}
-            disabled={!input.trim()}
+            disabled={!input.trim() || sending}
             className="w-9 h-9 rounded-full flex items-center justify-center bg-[var(--hazy-amber)] text-[#111] hover:opacity-90 transition-opacity disabled:opacity-30 flex-shrink-0"
           >
             <Icon name="ArrowUp" size={18} />
@@ -122,9 +161,7 @@ export default function Conversation({ chat, onBack }: ConversationProps) {
   );
 }
 
-function MessageBubble({ message, delay }: { message: Message; delay: number }) {
-  const isMine = message.senderId === "me";
-
+function MessageBubble({ message, isMine, delay }: { message: ApiMessage; isMine: boolean; delay: number }) {
   return (
     <div
       className={`flex ${isMine ? "justify-end" : "justify-start"} animate-fade-up`}
@@ -139,12 +176,13 @@ function MessageBubble({ message, delay }: { message: Message; delay: number }) 
       >
         <p className="text-sm leading-relaxed break-words">{message.text}</p>
         <div className="flex items-center justify-end gap-1 mt-0.5">
+          <Icon name="Lock" size={8} className="text-[var(--hazy-amber)] opacity-30" />
           <span className="text-[10px] text-muted-foreground">{message.timestamp}</span>
           {isMine && (
             <Icon
-              name={message.isRead ? "CheckCheck" : "Check"}
+              name={message.is_read ? "CheckCheck" : "Check"}
               size={12}
-              className={message.isRead ? "text-[var(--hazy-amber)]" : "text-muted-foreground"}
+              className={message.is_read ? "text-[var(--hazy-amber)]" : "text-muted-foreground"}
             />
           )}
         </div>

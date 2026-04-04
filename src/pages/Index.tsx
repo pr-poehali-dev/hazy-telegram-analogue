@@ -1,37 +1,76 @@
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
+import AuthScreen from "@/components/AuthScreen";
 import ChatList from "@/components/ChatList";
 import Conversation from "@/components/Conversation";
 import NewChat from "@/components/NewChat";
 import Profile from "@/components/Profile";
-import { Chat, View, User } from "@/types/chat";
-import { chats as mockChats } from "@/data/mockData";
+import { isLoggedIn, getStoredUser, getChatList } from "@/lib/api";
+
+type View = "chats" | "conversation" | "newchat" | "profile";
+
+interface ActiveChat {
+  id: string;
+  participantName: string;
+  participantStatus: string;
+}
 
 export default function Index() {
+  const [authed, setAuthed] = useState(isLoggedIn());
   const [view, setView] = useState<View>("chats");
-  const [activeChat, setActiveChat] = useState<Chat | null>(null);
+  const [activeChat, setActiveChat] = useState<ActiveChat | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [chats, setChats] = useState<any[]>([]);
+  const [chatsLoading, setChatsLoading] = useState(true);
 
-  const handleSelectChat = (chat: Chat) => {
-    setActiveChat(chat);
+  const currentUser = getStoredUser();
+
+  const loadChats = useCallback(async () => {
+    try {
+      const data = await getChatList();
+      setChats(data);
+    } catch {
+      // ignore
+    } finally {
+      setChatsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (authed) {
+      loadChats();
+      const interval = setInterval(loadChats, 5000);
+      return () => clearInterval(interval);
+    }
+  }, [authed, loadChats]);
+
+  if (!authed) {
+    return <AuthScreen onAuth={() => setAuthed(true)} />;
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const handleSelectChat = (chat: any) => {
+    setActiveChat({
+      id: chat.id,
+      participantName: chat.participant.name,
+      participantStatus: chat.participant.status,
+    });
     setView("conversation");
   };
 
-  const handleStartChat = (user: User) => {
-    const existing = mockChats.find((c) => c.participant.id === user.id);
-    if (existing) {
-      handleSelectChat(existing);
-    } else {
-      const newChat: Chat = {
-        id: `c-${Date.now()}`,
-        participant: user,
-        unreadCount: 0,
-        category: "personal",
-        isPinned: false,
-      };
-      handleSelectChat(newChat);
-    }
+  const handleChatCreated = (chatId: string, participant: { id: string; name: string; status: string }) => {
+    setActiveChat({
+      id: chatId,
+      participantName: participant.name,
+      participantStatus: participant.status,
+    });
+    setView("conversation");
+    loadChats();
   };
 
-  const goBack = () => setView("chats");
+  const goBack = () => {
+    setView("chats");
+    loadChats();
+  };
 
   return (
     <div className="h-screen w-screen overflow-hidden bg-background flex items-center justify-center">
@@ -47,19 +86,28 @@ export default function Index() {
         <div className="relative z-10 flex flex-col h-full">
           {view === "chats" && (
             <ChatList
-              chats={mockChats}
+              chats={chats}
+              loading={chatsLoading}
               onSelectChat={handleSelectChat}
               onNewChat={() => setView("newchat")}
               onProfile={() => setView("profile")}
             />
           )}
           {view === "conversation" && activeChat && (
-            <Conversation chat={activeChat} onBack={goBack} />
+            <Conversation
+              chatId={activeChat.id}
+              participantName={activeChat.participantName}
+              participantStatus={activeChat.participantStatus}
+              currentUserId={currentUser?.user_id || ""}
+              onBack={goBack}
+            />
           )}
           {view === "newchat" && (
-            <NewChat onBack={goBack} onStartChat={handleStartChat} />
+            <NewChat onBack={goBack} onChatCreated={handleChatCreated} />
           )}
-          {view === "profile" && <Profile onBack={goBack} />}
+          {view === "profile" && (
+            <Profile onBack={goBack} onLogout={() => { setAuthed(false); setView("chats"); }} />
+          )}
         </div>
       </div>
     </div>
