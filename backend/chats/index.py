@@ -62,8 +62,8 @@ def handler(event, context):
             cur.execute(f"""
                 SELECT c.id as chat_id, c.created_at,
                     u.id as participant_id, u.username, u.display_name, u.status, u.last_seen,
-                    (SELECT COUNT(*) FROM {schema}.messages m2 
-                     WHERE m2.chat_id = c.id AND m2.sender_id != '{user_id}' AND m2.is_read = false) as unread_count
+                    (SELECT COUNT(*) FROM {schema}.pending_envelopes pe
+                     WHERE pe.chat_id = c.id AND pe.recipient_id = '{user_id}') as pending_count
                 FROM {schema}.chats c
                 JOIN {schema}.chat_participants cp ON cp.chat_id = c.id AND cp.user_id = '{user_id}'
                 JOIN {schema}.chat_participants cp2 ON cp2.chat_id = c.id AND cp2.user_id != '{user_id}'
@@ -74,15 +74,8 @@ def handler(event, context):
 
             chats = []
             for row in rows:
-                chat_id = str(row['chat_id'])
-                cur.execute(f"""
-                    SELECT id, sender_id, created_at, is_read FROM {schema}.messages 
-                    WHERE chat_id = '{chat_id}' ORDER BY created_at DESC LIMIT 1
-                """)
-                last_msg = cur.fetchone()
-
                 chats.append({
-                    'id': chat_id,
+                    'id': str(row['chat_id']),
                     'participant': {
                         'id': str(row['participant_id']),
                         'name': row['display_name'],
@@ -90,12 +83,10 @@ def handler(event, context):
                         'status': row['status'],
                         'lastSeen': str(row['last_seen']) if row['last_seen'] else None,
                     },
-                    'unreadCount': row['unread_count'],
-                    'lastMessageAt': str(last_msg['created_at']) if last_msg else str(row['created_at']),
-                    'hasMessages': last_msg is not None,
+                    'pendingCount': row['pending_count'],
+                    'createdAt': str(row['created_at']),
                 })
 
-            chats.sort(key=lambda x: x['lastMessageAt'], reverse=True)
             return resp(200, {'chats': chats})
         finally:
             conn.close()

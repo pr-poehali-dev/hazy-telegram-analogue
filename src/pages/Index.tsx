@@ -4,12 +4,13 @@ import ChatList from "@/components/ChatList";
 import Conversation from "@/components/Conversation";
 import NewChat from "@/components/NewChat";
 import Profile from "@/components/Profile";
-import { isLoggedIn, getStoredUser, getChatList } from "@/lib/api";
+import { isLoggedIn, getStoredUser, getChatList, heartbeat } from "@/lib/api";
 
 type View = "chats" | "conversation" | "newchat" | "profile";
 
 interface ActiveChat {
   id: string;
+  participantId: string;
   participantName: string;
   participantStatus: string;
 }
@@ -38,8 +39,13 @@ export default function Index() {
   useEffect(() => {
     if (authed) {
       loadChats();
-      const interval = setInterval(loadChats, 5000);
-      return () => clearInterval(interval);
+      heartbeat().catch(() => {});
+      const chatInterval = setInterval(loadChats, 5000);
+      const hbInterval = setInterval(() => heartbeat().catch(() => {}), 15000);
+      return () => {
+        clearInterval(chatInterval);
+        clearInterval(hbInterval);
+      };
     }
   }, [authed, loadChats]);
 
@@ -51,6 +57,7 @@ export default function Index() {
   const handleSelectChat = (chat: any) => {
     setActiveChat({
       id: chat.id,
+      participantId: chat.participant.id,
       participantName: chat.participant.name,
       participantStatus: chat.participant.status,
     });
@@ -60,6 +67,7 @@ export default function Index() {
   const handleChatCreated = (chatId: string, participant: { id: string; name: string; status: string }) => {
     setActiveChat({
       id: chatId,
+      participantId: participant.id,
       participantName: participant.name,
       participantStatus: participant.status,
     });
@@ -96,6 +104,7 @@ export default function Index() {
           {view === "conversation" && activeChat && (
             <Conversation
               chatId={activeChat.id}
+              participantId={activeChat.participantId}
               participantName={activeChat.participantName}
               participantStatus={activeChat.participantStatus}
               currentUserId={currentUser?.user_id || ""}

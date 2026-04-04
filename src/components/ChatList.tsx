@@ -10,9 +10,8 @@ interface ApiChat {
     status: string;
     lastSeen: string | null;
   };
-  unreadCount: number;
-  lastMessageAt: string;
-  hasMessages: boolean;
+  pendingCount: number;
+  createdAt: string;
 }
 
 interface ChatListProps {
@@ -94,7 +93,7 @@ export default function ChatList({ chats, loading, onSelectChat, onNewChat, onPr
   );
 }
 
-function ChatRow({ chat, onClick, delay }: { chat: { id: string; participant: { name: string; status: string }; unreadCount: number; lastMessageAt: string }; onClick: () => void; delay: number }) {
+function ChatRow({ chat, onClick, delay }: { chat: { id: string; participant: { name: string; status: string }; pendingCount?: number; createdAt?: string }; onClick: () => void; delay: number }) {
   const statusColor =
     chat.participant.status === "online" ? "#4ade80" : "#555";
 
@@ -107,7 +106,7 @@ function ChatRow({ chat, onClick, delay }: { chat: { id: string; participant: { 
 
   const timeStr = (() => {
     try {
-      const d = new Date(chat.lastMessageAt);
+      const d = new Date(chat.createdAt || "");
       const now = new Date();
       if (d.toDateString() === now.toDateString()) {
         return d.toLocaleTimeString("ru", { hour: "2-digit", minute: "2-digit" });
@@ -144,9 +143,9 @@ function ChatRow({ chat, onClick, delay }: { chat: { id: string; participant: { 
             <Icon name="Lock" size={10} className="text-[var(--hazy-amber)] opacity-40 inline mr-1" />
             Зашифрованный чат
           </p>
-          {chat.unreadCount > 0 && (
+          {(chat.pendingCount || 0) > 0 && (
             <span className="min-w-[18px] h-[18px] rounded-full bg-[var(--hazy-amber)] text-[#111] text-[10px] font-bold flex items-center justify-center px-1">
-              {chat.unreadCount}
+              {chat.pendingCount}
             </span>
           )}
         </div>

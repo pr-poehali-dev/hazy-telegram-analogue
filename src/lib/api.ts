@@ -101,23 +101,4 @@ export async function createChat(participantId: string) {
   });
 }
 
-export async function getMessages(chatId: string, limit = 50, offset = 0) {
-  const data = await request(
-    `${MESSAGES_URL}?action=list&chat_id=${chatId}&limit=${limit}&offset=${offset}`
-  );
-  return data.messages;
-}
-
-export async function sendMessage(chatId: string, text: string) {
-  return request(`${MESSAGES_URL}?action=send`, {
-    method: "POST",
-    body: JSON.stringify({ chat_id: chatId, text }),
-  });
-}
-
-export async function markRead(chatId: string) {
-  return request(`${MESSAGES_URL}?action=read`, {
-    method: "POST",
-    body: JSON.stringify({ chat_id: chatId }),
-  });
-}
+export { sendEnvelope, fetchEnvelopes, ackEnvelopes, heartbeat } from "./p2p";

@@ -42,20 +42,12 @@ def encrypt_message(text: str, chat_key: bytes) -> tuple:
     iv_b64 = base64.b64encode(iv).decode()
     return encrypted, iv_b64
 
-def decrypt_message(encrypted_body: str, iv_b64: str, chat_key: bytes) -> str:
-    data = base64.b64decode(encrypted_body)
-    ct = data[:-16]
-    tag = data[-16:]
-    iv = base64.b64decode(iv_b64)
-    cipher = Cipher(algorithms.AES(chat_key), modes.GCM(iv, tag), backend=default_backend())
-    decryptor = cipher.decryptor()
-    return (decryptor.update(ct) + decryptor.finalize()).decode()
-
 def get_or_create_chat_key(conn, schema, chat_id, user_id):
     cur = conn.cursor(cursor_factory=RealDictCursor)
     cur.execute(f"SELECT encrypted_chat_key FROM {schema}.encryption_keys WHERE chat_id = '{chat_id}' AND user_id = '{user_id}'")
     row = cur.fetchone()
     if row:
+        cur.close()
         return base64.b64decode(row['encrypted_chat_key'])
 
     cur.execute(f"SELECT encrypted_chat_key FROM {schema}.encryption_keys WHERE chat_id = '{chat_id}' LIMIT 1")
@@ -82,7 +74,7 @@ def resp(status, body):
     return {'statusCode': status, 'headers': {**CORS, 'Content-Type': 'application/json'}, 'body': json.dumps(body, default=str)}
 
 def handler(event, context):
-    """Отправка и получение зашифрованных сообщений E2E"""
+    """P2P гибридный мессенджер — конверты для офлайн, сигналинг для WebRTC"""
     if event.get('httpMethod') == 'OPTIONS':
         return {'statusCode': 200, 'headers': CORS, 'body': ''}
 
@@ -96,7 +88,33 @@ def handler(event, context):
     body = json.loads(event.get('body') or '{}')
     schema = os.environ.get('MAIN_DB_SCHEMA', 'public')
 
-    if method == 'POST' and action == 'send':
+    if method == 'POST' and action == 'envelope_store':
+        chat_id = body.get('chat_id', '')
+        encrypted_body = body.get('encrypted_body', '')
+        iv = body.get('iv', '')
+        if not chat_id or not encrypted_body or not iv:
+            return resp(400, {'error': 'chat_id, encrypted_body, iv обязательны'})
+
+        conn = get_conn()
+        try:
+            cur = conn.cursor(cursor_factory=RealDictCursor)
+            cur.execute(f"SELECT user_id FROM {schema}.chat_participants WHERE chat_id = '{chat_id}' AND user_id != '{user_id}'")
+            recipient = cur.fetchone()
+            if not recipient:
+                return resp(404, {'error': 'Получатель не найден'})
+
+            env_id = str(uuid.uuid4())
+            recipient_id = str(recipient['user_id'])
+            cur.execute(
+                f"INSERT INTO {schema}.pending_envelopes (id, chat_id, sender_id, recipient_id, encrypted_body, iv) "
+                f"VALUES ('{env_id}', '{chat_id}', '{user_id}', '{recipient_id}', '{encrypted_body}', '{iv}')"
+            )
+            conn.commit()
+            return resp(201, {'id': env_id, 'stored': True})
+        finally:
+            conn.close()
+
+    elif method == 'POST' and action == 'envelope_store_raw':
         chat_id = body.get('chat_id', '')
         text = body.get('text', '')
         if not chat_id or not text:
@@ -105,93 +123,172 @@ def handler(event, context):
         conn = get_conn()
         try:
             cur = conn.cursor(cursor_factory=RealDictCursor)
-            cur.execute(f"SELECT 1 FROM {schema}.chat_participants WHERE chat_id = '{chat_id}' AND user_id = '{user_id}'")
-            if not cur.fetchone():
-                return resp(403, {'error': 'Нет доступа к чату'})
+            cur.execute(f"SELECT user_id FROM {schema}.chat_participants WHERE chat_id = '{chat_id}' AND user_id != '{user_id}'")
+            recipient = cur.fetchone()
+            if not recipient:
+                return resp(404, {'error': 'Получатель не найден'})
 
             chat_key = get_or_create_chat_key(conn, schema, chat_id, user_id)
             encrypted_body, iv = encrypt_message(text, chat_key)
 
-            msg_id = str(uuid.uuid4())
+            env_id = str(uuid.uuid4())
+            recipient_id = str(recipient['user_id'])
             cur.execute(
-                f"INSERT INTO {schema}.messages (id, chat_id, sender_id, encrypted_body, iv) "
-                f"VALUES ('{msg_id}', '{chat_id}', '{user_id}', '{encrypted_body}', '{iv}')"
+                f"INSERT INTO {schema}.pending_envelopes (id, chat_id, sender_id, recipient_id, encrypted_body, iv) "
+                f"VALUES ('{env_id}', '{chat_id}', '{user_id}', '{recipient_id}', '{encrypted_body}', '{iv}')"
             )
             conn.commit()
-
             return resp(201, {
-                'id': msg_id,
+                'id': env_id,
                 'chat_id': chat_id,
                 'sender_id': user_id,
-                'text': text,
                 'timestamp': time.strftime('%H:%M'),
-                'is_encrypted': True
+                'stored': True
             })
         finally:
             conn.close()
 
-    elif method == 'GET' and action == 'list':
-        chat_id = params.get('chat_id', '')
-        if not chat_id:
-            return resp(400, {'error': 'chat_id обязателен'})
-
-        limit = int(params.get('limit', '50'))
-        offset = int(params.get('offset', '0'))
-
+    elif method == 'GET' and action == 'envelope_fetch':
         conn = get_conn()
         try:
             cur = conn.cursor(cursor_factory=RealDictCursor)
-            cur.execute(f"SELECT 1 FROM {schema}.chat_participants WHERE chat_id = '{chat_id}' AND user_id = '{user_id}'")
-            if not cur.fetchone():
-                return resp(403, {'error': 'Нет доступа к чату'})
-
-            chat_key = get_or_create_chat_key(conn, schema, chat_id, user_id)
-
-            cur.execute(
-                f"SELECT m.id, m.chat_id, m.sender_id, m.encrypted_body, m.iv, m.is_read, m.created_at, "
-                f"u.display_name as sender_name "
-                f"FROM {schema}.messages m "
-                f"JOIN {schema}.users u ON u.id = m.sender_id "
-                f"WHERE m.chat_id = '{chat_id}' "
-                f"ORDER BY m.created_at ASC LIMIT {limit} OFFSET {offset}"
-            )
+            chat_id_filter = params.get('chat_id', '')
+            if chat_id_filter:
+                cur.execute(
+                    f"SELECT e.id, e.chat_id, e.sender_id, e.encrypted_body, e.iv, e.created_at, "
+                    f"u.display_name as sender_name "
+                    f"FROM {schema}.pending_envelopes e "
+                    f"JOIN {schema}.users u ON u.id = e.sender_id "
+                    f"WHERE e.recipient_id = '{user_id}' AND e.chat_id = '{chat_id_filter}' "
+                    f"ORDER BY e.created_at ASC"
+                )
+            else:
+                cur.execute(
+                    f"SELECT e.id, e.chat_id, e.sender_id, e.encrypted_body, e.iv, e.created_at, "
+                    f"u.display_name as sender_name "
+                    f"FROM {schema}.pending_envelopes e "
+                    f"JOIN {schema}.users u ON u.id = e.sender_id "
+                    f"WHERE e.recipient_id = '{user_id}' "
+                    f"ORDER BY e.created_at ASC"
+                )
             rows = cur.fetchall()
 
-            messages = []
+            envelopes = []
             for row in rows:
+                chat_key = get_or_create_chat_key(conn, schema, str(row['chat_id']), user_id)
                 try:
-                    decrypted = decrypt_message(row['encrypted_body'], row['iv'], chat_key)
+                    data = base64.b64decode(row['encrypted_body'])
+                    ct = data[:-16]
+                    tag = data[-16:]
+                    iv_bytes = base64.b64decode(row['iv'])
+                    cipher = Cipher(algorithms.AES(chat_key), modes.GCM(iv_bytes, tag), backend=default_backend())
+                    decryptor = cipher.decryptor()
+                    text = (decryptor.update(ct) + decryptor.finalize()).decode()
                 except Exception:
-                    decrypted = '[не удалось расшифровать]'
+                    text = '[не удалось расшифровать]'
 
-                messages.append({
+                envelopes.append({
                     'id': str(row['id']),
                     'chat_id': str(row['chat_id']),
                     'sender_id': str(row['sender_id']),
                     'sender_name': row['sender_name'],
-                    'text': decrypted,
-                    'is_read': row['is_read'],
-                    'is_encrypted': True,
+                    'text': text,
                     'timestamp': row['created_at'].strftime('%H:%M') if row['created_at'] else '',
                     'created_at': str(row['created_at'])
                 })
-
-            return resp(200, {'messages': messages})
+            return resp(200, {'envelopes': envelopes})
         finally:
             conn.close()
 
-    elif method == 'POST' and action == 'read':
-        chat_id = body.get('chat_id', '')
-        if not chat_id:
-            return resp(400, {'error': 'chat_id обязателен'})
+    elif method == 'POST' and action == 'envelope_ack':
+        envelope_ids = body.get('ids', [])
+        if not envelope_ids:
+            return resp(400, {'error': 'ids обязателен'})
 
         conn = get_conn()
         try:
             cur = conn.cursor()
-            cur.execute(f"UPDATE {schema}.messages SET is_read = true WHERE chat_id = '{chat_id}' AND sender_id != '{user_id}' AND is_read = false")
+            ids_str = "','".join(envelope_ids)
+            cur.execute(f"SELECT COUNT(*) FROM {schema}.pending_envelopes WHERE id IN ('{ids_str}') AND recipient_id = '{user_id}'")
+            count = cur.fetchone()[0]
+            cur.execute(f"INSERT INTO {schema}.messages (id, chat_id, sender_id, encrypted_body, iv, is_read, created_at) SELECT id, chat_id, sender_id, encrypted_body, iv, true, created_at FROM {schema}.pending_envelopes WHERE id IN ('{ids_str}') AND recipient_id = '{user_id}'")
+            cur.execute(f"UPDATE {schema}.pending_envelopes SET recipient_id = '00000000-0000-0000-0000-000000000000' WHERE id IN ('{ids_str}') AND recipient_id = '{user_id}'")
             conn.commit()
-            return resp(200, {'ok': True})
+            return resp(200, {'acknowledged': count})
         finally:
             conn.close()
 
-    return resp(400, {'error': 'Укажите action: send, list, read'})
+    elif method == 'POST' and action == 'signal_send':
+        chat_id = body.get('chat_id', '')
+        to_user_id = body.get('to_user_id', '')
+        signal_type = body.get('signal_type', '')
+        payload = body.get('payload', '')
+        if not chat_id or not to_user_id or not signal_type:
+            return resp(400, {'error': 'chat_id, to_user_id, signal_type обязательны'})
+
+        conn = get_conn()
+        try:
+            cur = conn.cursor()
+            sig_id = str(uuid.uuid4())
+            payload_str = json.dumps(payload) if isinstance(payload, dict) else str(payload)
+            cur.execute(
+                f"INSERT INTO {schema}.signaling (id, chat_id, from_user_id, to_user_id, signal_type, payload) "
+                f"VALUES ('{sig_id}', '{chat_id}', '{user_id}', '{to_user_id}', '{signal_type}', '{payload_str}')"
+            )
+            conn.commit()
+            return resp(201, {'id': sig_id})
+        finally:
+            conn.close()
+
+    elif method == 'GET' and action == 'signal_poll':
+        conn = get_conn()
+        try:
+            cur = conn.cursor(cursor_factory=RealDictCursor)
+            cur.execute(
+                f"SELECT id, chat_id, from_user_id, signal_type, payload, created_at "
+                f"FROM {schema}.signaling "
+                f"WHERE to_user_id = '{user_id}' "
+                f"ORDER BY created_at ASC LIMIT 50"
+            )
+            signals = cur.fetchall()
+
+            result = []
+            ids_to_remove = []
+            for s in signals:
+                ids_to_remove.append(str(s['id']))
+                try:
+                    payload = json.loads(s['payload'])
+                except Exception:
+                    payload = s['payload']
+                result.append({
+                    'id': str(s['id']),
+                    'chat_id': str(s['chat_id']),
+                    'from_user_id': str(s['from_user_id']),
+                    'signal_type': s['signal_type'],
+                    'payload': payload,
+                })
+
+            if ids_to_remove:
+                ids_str = "','".join(ids_to_remove)
+                cur.execute(f"UPDATE {schema}.signaling SET to_user_id = '00000000-0000-0000-0000-000000000000' WHERE id IN ('{ids_str}')")
+                conn.commit()
+
+            return resp(200, {'signals': result})
+        finally:
+            conn.close()
+
+    elif method == 'POST' and action == 'heartbeat':
+        conn = get_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute(f"UPDATE {schema}.users SET status = 'online', last_seen = now() WHERE id = '{user_id}'")
+            conn.commit()
+
+            cur2 = conn.cursor(cursor_factory=RealDictCursor)
+            cur2.execute(f"SELECT COUNT(*) as cnt FROM {schema}.pending_envelopes WHERE recipient_id = '{user_id}'")
+            pending = cur2.fetchone()['cnt']
+            return resp(200, {'online': True, 'pending_envelopes': pending})
+        finally:
+            conn.close()
+
+    return resp(400, {'error': 'Укажите action: envelope_store, envelope_store_raw, envelope_fetch, envelope_ack, signal_send, signal_poll, heartbeat'})
