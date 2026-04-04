@@ -170,12 +170,13 @@ export default function Conversation({
     if (myKeysRef.current) {
       conn.setMyPublicKey(myKeysRef.current.publicKey);
     }
-    if (role === "creator") {
+    const shouldInitiate = myPeerId > remotePeerId;
+    if (shouldInitiate) {
       conn.initiate();
     } else {
       conn.waitForOffer();
     }
-  }, [roomCode, myPeerId, remotePeerId, role, addMessage]);
+  }, [roomCode, myPeerId, remotePeerId, addMessage]);
 
   useEffect(() => {
     setupConnection();
