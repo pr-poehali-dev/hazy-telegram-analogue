@@ -27,8 +27,8 @@ export default function JoinScreen({ code, onJoined, onBack }: JoinScreenProps) 
 
     joinRoom(code, identity.peerId, identity.name)
       .then((data) => {
-        if (data.remote_peer) {
-          onJoined(data.remote_peer.peer_id, data.remote_peer.name);
+        if (data.peer_id && data.peer_name) {
+          onJoined(data.peer_id, data.peer_name);
         } else {
           setStatus("error");
           setErrorMsg("Не удалось найти собеседника");

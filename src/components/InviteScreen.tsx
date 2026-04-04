@@ -25,9 +25,9 @@ export default function InviteScreen({
       const identity = getIdentity();
       if (!identity) return;
       const data = await roomStatus(roomCode, identity.peerId);
-      if (data.status === "paired" && data.remote_peer) {
+      if (data.status === "paired" && data.peer_id) {
         if (pollRef.current) clearInterval(pollRef.current);
-        onPaired(data.remote_peer.peer_id, data.remote_peer.name);
+        onPaired(data.peer_id, data.peer_name);
       }
     } catch {
       // room may have expired
