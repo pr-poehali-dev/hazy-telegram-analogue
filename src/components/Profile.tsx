@@ -1,111 +1,137 @@
 import { useState } from "react";
 import Icon from "@/components/ui/icon";
-import { logout, getStoredUser } from "@/lib/api";
+import { getIdentity, updateName } from "@/lib/identity";
 
 interface ProfileProps {
   onBack: () => void;
-  onLogout: () => void;
 }
 
-export default function Profile({ onBack, onLogout }: ProfileProps) {
-  const [notifications, setNotifications] = useState(true);
-  const [readReceipts, setReadReceipts] = useState(true);
-  const user = getStoredUser();
+export default function Profile({ onBack }: ProfileProps) {
+  const identity = getIdentity();
+  const [name, setName] = useState(identity?.name || "");
+  const [saved, setSaved] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [confirmClear, setConfirmClear] = useState(false);
 
-  const handleLogout = () => {
-    logout();
-    onLogout();
+  const handleSaveName = () => {
+    if (!name.trim()) return;
+    updateName(name.trim());
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
   };
 
-  const initials = (user?.display_name || "U")
-    .split(" ")
-    .map((w: string) => w[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase();
+  const handleCopyId = async () => {
+    if (!identity) return;
+    try {
+      await navigator.clipboard.writeText(identity.peerId);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleClearAll = () => {
+    if (!confirmClear) {
+      setConfirmClear(true);
+      return;
+    }
+    localStorage.clear();
+    indexedDB.deleteDatabase("hazy_messages");
+    window.location.reload();
+  };
 
   return (
-    <div className="flex flex-col h-full">
-      <div className="flex items-center gap-3 px-4 py-4 border-b border-border/50">
+    <div className="flex flex-col h-full animate-fade-up">
+      {/* Header */}
+      <div className="flex items-center gap-3 px-4 py-4 shrink-0">
         <button
           onClick={onBack}
-          className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-[var(--hazy-surface-hover)] transition-colors"
+          className="w-9 h-9 rounded-xl flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-[var(--hazy-surface)] transition-colors"
         >
-          <Icon name="ArrowLeft" size={18} />
+          <Icon name="ArrowLeft" size={20} />
         </button>
-        <h2 className="text-base font-semibold">Профиль</h2>
+        <h2 className="text-sm font-semibold text-foreground">Настройки</h2>
       </div>
 
-      <div className="flex-1 overflow-y-auto scrollbar-thin">
-        <div className="flex flex-col items-center py-8 animate-fade-up">
-          <div className="w-20 h-20 rounded-full bg-[var(--hazy-surface-active)] flex items-center justify-center text-2xl font-bold text-[var(--hazy-amber)] mb-4">
-            {initials}
+      <div className="flex-1 px-5 space-y-6 overflow-y-auto scrollbar-thin">
+        {/* Avatar + Name */}
+        <div className="flex flex-col items-center pt-4">
+          <div className="w-20 h-20 rounded-full bg-[var(--hazy-surface)] flex items-center justify-center mb-4">
+            <span
+              className="text-2xl font-bold"
+              style={{ color: "var(--hazy-amber)" }}
+            >
+              {(identity?.name || "A").charAt(0).toUpperCase()}
+            </span>
           </div>
-          <h3 className="text-lg font-semibold">{user?.display_name || "Пользователь"}</h3>
-          <p className="text-xs text-muted-foreground mt-0.5">@{user?.username || "user"}</p>
-          <p className="text-xs text-muted-foreground mt-2 flex items-center gap-1">
-            <Icon name="ShieldCheck" size={12} className="text-[var(--hazy-amber)]" />
-            E2E шифрование активно
+        </div>
+
+        {/* Name field */}
+        <div>
+          <label className="text-xs text-muted-foreground mb-1.5 block">
+            Ваше имя
+          </label>
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              maxLength={32}
+              className="flex-1 rounded-xl bg-[var(--hazy-surface)] border-0 text-sm px-4 py-3 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-[var(--hazy-amber-dim)]"
+            />
+            <button
+              onClick={handleSaveName}
+              disabled={!name.trim()}
+              className="rounded-xl bg-[var(--hazy-amber)] text-[#111] font-medium text-sm px-4 py-3 disabled:opacity-40 active:opacity-80 transition-opacity shrink-0"
+            >
+              {saved ? "Сохранено" : "Сохранить"}
+            </button>
+          </div>
+        </div>
+
+        {/* Peer ID */}
+        <div>
+          <label className="text-xs text-muted-foreground mb-1.5 block">
+            Ваш Peer ID
+          </label>
+          <div
+            onClick={handleCopyId}
+            className="rounded-xl bg-[var(--hazy-surface)] px-4 py-3 flex items-center gap-2 cursor-pointer hover:bg-[var(--hazy-surface-hover)] active:bg-[var(--hazy-surface-active)] transition-colors"
+          >
+            <p className="text-xs text-muted-foreground font-mono flex-1 truncate">
+              {identity?.peerId || "---"}
+            </p>
+            <Icon
+              name={copied ? "Check" : "Copy"}
+              size={16}
+              className="text-muted-foreground shrink-0"
+            />
+          </div>
+          <p className="text-[11px] text-muted-foreground/60 mt-1.5 px-1">
+            Уникальный идентификатор, генерируется случайно
           </p>
         </div>
 
-        <div className="px-4 space-y-1 animate-fade-up" style={{ animationDelay: "60ms" }}>
-          <SectionLabel>Безопасность</SectionLabel>
-          <SettingsRow icon="Key" label="Ключ шифрования" value="AES-256-GCM" accent />
-          <SettingsRow icon="Fingerprint" label="Биометрия" value="Выключена" />
-          <SettingsRow icon="History" label="Автоудаление" value="Выключено" />
-        </div>
-
-        <div className="px-4 space-y-1 mt-6 animate-fade-up" style={{ animationDelay: "120ms" }}>
-          <SectionLabel>Настройки</SectionLabel>
-          <ToggleRow icon="Bell" label="Уведомления" enabled={notifications} onChange={setNotifications} />
-          <ToggleRow icon="CheckCheck" label="Отчёты о прочтении" enabled={readReceipts} onChange={setReadReceipts} />
-          <SettingsRow icon="Moon" label="Тема" value="Тёмная" />
-        </div>
-
-        <div className="px-4 mt-8 mb-8 animate-fade-up" style={{ animationDelay: "180ms" }}>
+        {/* Danger zone */}
+        <div className="pt-4 border-t border-border/30">
           <button
-            onClick={handleLogout}
-            className="w-full py-3 rounded-xl bg-red-500/10 text-red-400 text-sm font-medium hover:bg-red-500/20 transition-colors"
+            onClick={handleClearAll}
+            className={`w-full rounded-xl text-sm font-medium py-3 transition-colors ${
+              confirmClear
+                ? "bg-destructive text-destructive-foreground"
+                : "bg-[var(--hazy-surface)] text-destructive hover:bg-[var(--hazy-surface-hover)]"
+            }`}
           >
-            Выйти из аккаунта
+            {confirmClear
+              ? "Нажмите ещё раз для подтверждения"
+              : "Удалить все данные"}
           </button>
+          <p className="text-[11px] text-muted-foreground/60 mt-2 px-1 text-center">
+            Будут удалены все чаты, сообщения и ваша личность
+          </p>
         </div>
       </div>
     </div>
-  );
-}
-
-function SectionLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="py-2">
-      <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">{children}</span>
-    </div>
-  );
-}
-
-function SettingsRow({ icon, label, value, accent }: { icon: string; label: string; value: string; accent?: boolean }) {
-  return (
-    <div className="flex items-center gap-3 py-3 px-3 rounded-xl">
-      <div className="w-8 h-8 rounded-lg bg-[var(--hazy-surface)] flex items-center justify-center">
-        <Icon name={icon} size={16} className={accent ? "text-[var(--hazy-amber)]" : "text-muted-foreground"} />
-      </div>
-      <span className="flex-1 text-sm">{label}</span>
-      <span className={`text-xs ${accent ? "text-[var(--hazy-amber)]" : "text-muted-foreground"}`}>{value}</span>
-    </div>
-  );
-}
-
-function ToggleRow({ icon, label, enabled, onChange }: { icon: string; label: string; enabled: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <button onClick={() => onChange(!enabled)} className="w-full flex items-center gap-3 py-3 px-3 rounded-xl hover:bg-[var(--hazy-surface-hover)] transition-colors text-left">
-      <div className="w-8 h-8 rounded-lg bg-[var(--hazy-surface)] flex items-center justify-center">
-        <Icon name={icon} size={16} className="text-muted-foreground" />
-      </div>
-      <span className="flex-1 text-sm">{label}</span>
-      <div className={`w-10 h-6 rounded-full transition-colors relative ${enabled ? "bg-[var(--hazy-amber)]" : "bg-[var(--hazy-surface-active)]"}`}>
-        <div className={`absolute top-1 w-4 h-4 rounded-full bg-white shadow transition-transform ${enabled ? "translate-x-5" : "translate-x-1"}`} />
-      </div>
-    </button>
   );
 }

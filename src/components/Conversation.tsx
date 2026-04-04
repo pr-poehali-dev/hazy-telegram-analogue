@@ -1,301 +1,288 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import Icon from "@/components/ui/icon";
-import { P2PConnection, sendEnvelope, fetchEnvelopes, ackEnvelopes } from "@/lib/p2p";
-import { saveMessage, saveMessages, getChatMessages, LocalMessage } from "@/lib/messageStore";
-import { getStoredUser } from "@/lib/api";
+import { P2PConnection } from "@/lib/p2p";
+import {
+  getChatMessages,
+  saveMessage,
+  type LocalMessage,
+} from "@/lib/messageStore";
 
 interface ConversationProps {
-  chatId: string;
-  participantId: string;
-  participantName: string;
-  participantStatus: string;
-  currentUserId: string;
+  roomCode: string;
+  myPeerId: string;
+  myName: string;
+  remotePeerId: string;
+  remotePeerName: string;
   onBack: () => void;
 }
 
-export default function Conversation({ chatId, participantId, participantName, participantStatus, currentUserId, onBack }: ConversationProps) {
+export default function Conversation({
+  roomCode,
+  myPeerId,
+  myName,
+  remotePeerId,
+  remotePeerName,
+  onBack,
+}: ConversationProps) {
   const [messages, setMessages] = useState<LocalMessage[]>([]);
-  const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [sending, setSending] = useState(false);
-  const [p2pStatus, setP2pStatus] = useState<"disconnected" | "connecting" | "connected">("disconnected");
-  const bottomRef = useRef<HTMLDivElement>(null);
-  const p2pRef = useRef<P2PConnection | null>(null);
-  const envelopePollRef = useRef<ReturnType<typeof setInterval>>();
+  const [text, setText] = useState("");
+  const [p2pStatus, setP2pStatus] = useState<
+    "connecting" | "connected" | "disconnected"
+  >("connecting");
+  const connRef = useRef<P2PConnection | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
-  const user = getStoredUser();
-  const myName = user?.display_name || "Вы";
-
-  const addMessage = useCallback((msg: LocalMessage) => {
-    setMessages((prev) => {
-      if (prev.some((m) => m.id === msg.id)) return prev;
-      return [...prev, msg];
-    });
-    saveMessage(msg);
+  const scrollToBottom = useCallback(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, []);
 
+  // Load existing messages
   useEffect(() => {
-    let mounted = true;
-    const init = async () => {
-      const local = await getChatMessages(chatId);
-      if (mounted) {
-        setMessages(local);
-        setLoading(false);
-      }
+    getChatMessages(roomCode).then((msgs) => {
+      setMessages(msgs);
+      setTimeout(scrollToBottom, 100);
+    });
+  }, [roomCode, scrollToBottom]);
 
-      const envelopes = await fetchEnvelopes(chatId);
-      if (envelopes.length > 0 && mounted) {
-        const newMsgs: LocalMessage[] = envelopes.map((env: { id: string; chat_id: string; sender_id: string; sender_name: string; text: string; timestamp: string; created_at: string }) => ({
-          id: env.id,
-          chatId: env.chat_id,
-          senderId: env.sender_id,
-          senderName: env.sender_name,
-          text: env.text,
-          timestamp: env.timestamp,
-          createdAt: new Date(env.created_at).getTime(),
-          isEncrypted: true,
-          deliveredVia: "envelope" as const,
-        }));
-        await saveMessages(newMsgs);
-        await ackEnvelopes(envelopes.map((e: { id: string }) => e.id));
-        setMessages((prev) => {
-          const existingIds = new Set(prev.map((m) => m.id));
-          const fresh = newMsgs.filter((m) => !existingIds.has(m.id));
-          return [...prev, ...fresh];
-        });
-      }
+  // Setup P2P connection
+  useEffect(() => {
+    const handleMessage = (data: {
+      id: string;
+      text: string;
+      senderId: string;
+      senderName: string;
+      timestamp: string;
+    }) => {
+      const msg: LocalMessage = {
+        id: data.id,
+        chatId: roomCode,
+        senderId: data.senderId,
+        senderName: data.senderName,
+        text: data.text,
+        timestamp: data.timestamp,
+        createdAt: Date.now(),
+        isEncrypted: false,
+        deliveredVia: "p2p",
+      };
+      saveMessage(msg).catch(() => {});
+      setMessages((prev) => {
+        if (prev.some((m) => m.id === msg.id)) return prev;
+        return [...prev, msg];
+      });
     };
-    init();
-    return () => { mounted = false; };
-  }, [chatId]);
 
-  useEffect(() => {
-    const p2p = new P2PConnection(
-      chatId,
-      currentUserId,
-      participantId,
-      (data) => {
-        const msg: LocalMessage = {
-          id: data.id,
-          chatId,
-          senderId: data.senderId,
-          senderName: data.senderName,
-          text: data.text,
-          timestamp: data.timestamp,
-          createdAt: Date.now(),
-          isEncrypted: true,
-          deliveredVia: "p2p",
-        };
-        addMessage(msg);
-      },
-      (status) => setP2pStatus(status)
+    const handleStatus = (
+      status: "connecting" | "connected" | "disconnected"
+    ) => {
+      setP2pStatus(status);
+    };
+
+    const conn = new P2PConnection(
+      roomCode,
+      myPeerId,
+      remotePeerId,
+      handleMessage,
+      handleStatus
     );
-    p2pRef.current = p2p;
-    p2p.initiate();
+    connRef.current = conn;
+    conn.initiate();
 
     return () => {
-      p2p.destroy();
-      p2pRef.current = null;
+      conn.destroy();
+      connRef.current = null;
     };
-  }, [chatId, currentUserId, participantId, addMessage]);
+  }, [roomCode, myPeerId, remotePeerId]);
 
+  // Scroll on new messages
   useEffect(() => {
-    envelopePollRef.current = setInterval(async () => {
-      try {
-        const envelopes = await fetchEnvelopes(chatId);
-        if (envelopes.length > 0) {
-          const newMsgs: LocalMessage[] = envelopes.map((env: { id: string; chat_id: string; sender_id: string; sender_name: string; text: string; timestamp: string; created_at: string }) => ({
-            id: env.id,
-            chatId: env.chat_id,
-            senderId: env.sender_id,
-            senderName: env.sender_name,
-            text: env.text,
-            timestamp: env.timestamp,
-            createdAt: new Date(env.created_at).getTime(),
-            isEncrypted: true,
-            deliveredVia: "envelope" as const,
-          }));
-          await saveMessages(newMsgs);
-          await ackEnvelopes(envelopes.map((e: { id: string }) => e.id));
-          setMessages((prev) => {
-            const existingIds = new Set(prev.map((m) => m.id));
-            const fresh = newMsgs.filter((m) => !existingIds.has(m.id));
-            if (fresh.length === 0) return prev;
-            return [...prev, ...fresh];
-          });
-        }
-      } catch {
-        // ignore
-      }
-    }, 3000);
-    return () => clearInterval(envelopePollRef.current);
-  }, [chatId]);
+    scrollToBottom();
+  }, [messages, scrollToBottom]);
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  const handleSend = () => {
+    const trimmed = text.trim();
+    if (!trimmed || !connRef.current?.connected) return;
 
-  const send = async () => {
-    if (!input.trim() || sending) return;
-    const text = input.trim();
-    setInput("");
-    setSending(true);
-
-    const msgId = crypto.randomUUID();
-    const now = new Date();
-    const timestamp = now.toLocaleTimeString("ru", { hour: "2-digit", minute: "2-digit" });
-
-    const localMsg: LocalMessage = {
-      id: msgId,
-      chatId,
-      senderId: currentUserId,
+    const msgData = {
+      id: crypto.randomUUID(),
+      text: trimmed,
+      senderId: myPeerId,
       senderName: myName,
-      text,
-      timestamp,
-      createdAt: now.getTime(),
-      isEncrypted: true,
-      deliveredVia: "p2p",
+      timestamp: new Date().toISOString(),
     };
 
-    const p2p = p2pRef.current;
-    const sentViaP2P = p2p?.connected && p2p.send({
-      id: msgId,
-      text,
-      senderId: currentUserId,
-      senderName: myName,
-      timestamp,
-    });
-
-    if (!sentViaP2P) {
-      localMsg.deliveredVia = "envelope";
-      try {
-        await sendEnvelope(chatId, text);
-      } catch {
-        setInput(text);
-        setSending(false);
-        return;
-      }
+    const sent = connRef.current.send(msgData);
+    if (sent) {
+      const localMsg: LocalMessage = {
+        ...msgData,
+        chatId: roomCode,
+        createdAt: Date.now(),
+        isEncrypted: false,
+        deliveredVia: "p2p",
+      };
+      saveMessage(localMsg).catch(() => {});
+      setMessages((prev) => [...prev, localMsg]);
+      setText("");
+      inputRef.current?.focus();
     }
-
-    addMessage(localMsg);
-    setSending(false);
   };
 
-  const initials = participantName
-    .split(" ")
-    .map((w) => w[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase();
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  };
 
-  const statusBadge = p2pStatus === "connected"
-    ? { icon: "Wifi", label: "P2P", color: "text-green-400", bg: "bg-green-400/10" }
-    : { icon: "ShieldCheck", label: "E2E", color: "text-[var(--hazy-amber)]", bg: "bg-[var(--hazy-amber-dim)]" };
+  const statusColor =
+    p2pStatus === "connected"
+      ? "bg-green-500"
+      : p2pStatus === "connecting"
+        ? "bg-yellow-500"
+        : "bg-red-500";
+
+  const statusLabel =
+    p2pStatus === "connected"
+      ? "P2P"
+      : p2pStatus === "connecting"
+        ? "Соединение..."
+        : "Отключено";
+
+  const formatTime = (ts: string) => {
+    try {
+      return new Date(ts).toLocaleTimeString("ru-RU", {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    } catch {
+      return "";
+    }
+  };
 
   return (
-    <div className="flex flex-col h-full">
-      <div className="flex items-center gap-3 px-3 py-3 border-b border-border/50 bg-[var(--hazy-surface)]/60 backdrop-blur-sm">
+    <div className="flex flex-col h-full animate-fade-up">
+      {/* Header */}
+      <div className="flex items-center gap-3 px-4 py-3 shrink-0 border-b border-border/30">
         <button
           onClick={onBack}
-          className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-[var(--hazy-surface-hover)] transition-colors"
+          className="w-9 h-9 rounded-xl flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-[var(--hazy-surface)] transition-colors"
         >
-          <Icon name="ArrowLeft" size={18} />
+          <Icon name="ArrowLeft" size={20} />
         </button>
 
-        <div className="w-9 h-9 rounded-full bg-[var(--hazy-surface-active)] flex items-center justify-center text-sm font-semibold text-[var(--hazy-amber)]">
-          {initials}
+        <div className="w-9 h-9 rounded-full bg-[var(--hazy-surface)] flex items-center justify-center shrink-0">
+          <span
+            className="text-sm font-semibold"
+            style={{ color: "var(--hazy-amber)" }}
+          >
+            {remotePeerName.charAt(0).toUpperCase()}
+          </span>
         </div>
 
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium truncate">{participantName}</p>
-          <p className="text-[11px] text-muted-foreground flex items-center gap-1">
-            {participantStatus === "online" && (
-              <span className="w-1.5 h-1.5 rounded-full bg-green-400 inline-block" />
-            )}
-            {participantStatus === "online" ? "в сети" : "не в сети"}
+          <p className="text-sm font-medium text-foreground truncate">
+            {remotePeerName}
           </p>
-        </div>
-
-        <div className={`flex items-center gap-1 px-2 py-1 rounded-lg ${statusBadge.bg}`}>
-          <Icon name={statusBadge.icon} size={12} className={statusBadge.color} />
-          <span className={`text-[10px] font-medium ${statusBadge.color}`}>{statusBadge.label}</span>
-        </div>
-      </div>
-
-      <div className="flex-1 overflow-y-auto scrollbar-thin px-4 py-4 space-y-1.5">
-        {loading && (
-          <div className="flex items-center justify-center py-20">
-            <div className="w-5 h-5 border-2 border-[var(--hazy-amber)] border-t-transparent rounded-full animate-spin" />
-          </div>
-        )}
-
-        {!loading && messages.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
-            <Icon name="Lock" size={24} className="mb-3 text-[var(--hazy-amber)] opacity-40" />
-            <p className="text-sm">Чат зашифрован E2E</p>
-            <p className="text-xs mt-1 opacity-60">Сообщения хранятся только на вашем устройстве</p>
-          </div>
-        )}
-
-        {messages.map((msg) => (
-          <MessageBubble
-            key={msg.id}
-            message={msg}
-            isMine={msg.senderId === currentUserId}
-          />
-        ))}
-        <div ref={bottomRef} />
-      </div>
-
-      <div className="px-3 py-3 border-t border-border/30">
-        <div className="flex items-end gap-2">
-          <div className="flex-1 relative">
-            <textarea
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  send();
-                }
-              }}
-              placeholder="Сообщение..."
-              rows={1}
-              className="w-full resize-none py-2.5 px-4 rounded-2xl bg-[var(--hazy-surface)] border-0 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-[var(--hazy-amber-dim)] max-h-32"
+          <div className="flex items-center gap-1.5 mt-0.5">
+            <div
+              className={`w-1.5 h-1.5 rounded-full ${statusColor}`}
+              style={
+                p2pStatus === "connecting"
+                  ? { animation: "pulse-soft 1.5s ease-in-out infinite" }
+                  : undefined
+              }
             />
+            <span className="text-[11px] text-muted-foreground">
+              {statusLabel}
+            </span>
           </div>
-          <button
-            onClick={send}
-            disabled={!input.trim() || sending}
-            className="w-9 h-9 rounded-full flex items-center justify-center bg-[var(--hazy-amber)] text-[#111] hover:opacity-90 transition-opacity disabled:opacity-30 flex-shrink-0"
-          >
-            <Icon name="ArrowUp" size={18} />
-          </button>
         </div>
       </div>
-    </div>
-  );
-}
 
-function MessageBubble({ message, isMine }: { message: LocalMessage; isMine: boolean }) {
-  return (
-    <div className={`flex ${isMine ? "justify-end" : "justify-start"}`}>
-      <div
-        className={`max-w-[75%] px-3.5 py-2 rounded-2xl ${
-          isMine
-            ? "bg-[var(--hazy-chat-outgoing)] rounded-br-md"
-            : "bg-[var(--hazy-chat-incoming)] rounded-bl-md"
-        }`}
-      >
-        <p className="text-sm leading-relaxed break-words">{message.text}</p>
-        <div className="flex items-center justify-end gap-1 mt-0.5">
-          <Icon
-            name={message.deliveredVia === "p2p" ? "Wifi" : "Lock"}
-            size={8}
-            className={message.deliveredVia === "p2p" ? "text-green-400 opacity-50" : "text-[var(--hazy-amber)] opacity-30"}
+      {/* Messages */}
+      <div className="flex-1 overflow-y-auto scrollbar-thin px-4 py-3">
+        {messages.length === 0 && p2pStatus === "connected" && (
+          <div className="flex flex-col items-center justify-center h-full text-center -mt-8">
+            <Icon
+              name="Lock"
+              size={20}
+              className="text-muted-foreground mb-2"
+            />
+            <p className="text-xs text-muted-foreground max-w-[220px]">
+              Сообщения передаются напрямую через P2P и хранятся только на ваших
+              устройствах
+            </p>
+          </div>
+        )}
+
+        {messages.length === 0 && p2pStatus === "connecting" && (
+          <div className="flex flex-col items-center justify-center h-full text-center -mt-8">
+            <div className="w-10 h-10 rounded-full border-2 border-[var(--hazy-surface)] border-t-[var(--hazy-amber)] animate-spin mb-4" />
+            <p className="text-xs text-muted-foreground">
+              Устанавливаем P2P соединение...
+            </p>
+          </div>
+        )}
+
+        <div className="space-y-2">
+          {messages.map((msg) => {
+            const isMine = msg.senderId === myPeerId;
+            return (
+              <div
+                key={msg.id}
+                className={`flex ${isMine ? "justify-end" : "justify-start"}`}
+              >
+                <div
+                  className={`max-w-[80%] rounded-2xl px-3.5 py-2 ${
+                    isMine
+                      ? "bg-[var(--hazy-chat-outgoing)] rounded-br-md"
+                      : "bg-[var(--hazy-chat-incoming)] rounded-bl-md"
+                  }`}
+                >
+                  <p className="text-sm text-foreground whitespace-pre-wrap break-words leading-relaxed">
+                    {msg.text}
+                  </p>
+                  <p
+                    className={`text-[10px] mt-1 ${
+                      isMine
+                        ? "text-muted-foreground/50 text-right"
+                        : "text-muted-foreground/50"
+                    }`}
+                  >
+                    {formatTime(msg.timestamp)}
+                  </p>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <div ref={messagesEndRef} />
+      </div>
+
+      {/* Input */}
+      <div className="px-4 py-3 shrink-0 border-t border-border/30">
+        <div className="flex items-center gap-2">
+          <input
+            ref={inputRef}
+            type="text"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder={
+              p2pStatus === "connected"
+                ? "Сообщение..."
+                : "Ожидание соединения..."
+            }
+            disabled={p2pStatus !== "connected"}
+            className="flex-1 rounded-xl bg-[var(--hazy-surface)] border-0 text-sm px-4 py-3 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-[var(--hazy-amber-dim)] disabled:opacity-40"
           />
-          <span className="text-[10px] text-muted-foreground">{message.timestamp}</span>
-          {isMine && <Icon name="Check" size={12} className="text-[var(--hazy-amber)]" />}
+          <button
+            onClick={handleSend}
+            disabled={!text.trim() || p2pStatus !== "connected"}
+            className="w-11 h-11 rounded-xl bg-[var(--hazy-amber)] text-[#111] flex items-center justify-center shrink-0 disabled:opacity-30 active:scale-95 transition-all"
+          >
+            <Icon name="Send" size={18} />
+          </button>
         </div>
       </div>
     </div>
