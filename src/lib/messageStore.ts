@@ -89,6 +89,38 @@ export async function getChatsWithLastMessage(): Promise<Record<string, LocalMes
   });
 }
 
+const LAST_READ_PREFIX = "hazy_last_read_";
+
+export function markChatRead(chatId: string) {
+  localStorage.setItem(LAST_READ_PREFIX + chatId, String(Date.now()));
+}
+
+export function getLastReadTimestamp(chatId: string): number {
+  const raw = localStorage.getItem(LAST_READ_PREFIX + chatId);
+  return raw ? Number(raw) : 0;
+}
+
+export async function getUnreadCounts(myPeerId: string): Promise<Record<string, number>> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readonly");
+    const req = tx.objectStore(STORE_NAME).getAll();
+    req.onsuccess = () => {
+      const all = req.result as LocalMessage[];
+      const counts: Record<string, number> = {};
+      for (const msg of all) {
+        if (msg.senderId === myPeerId) continue;
+        const lastRead = getLastReadTimestamp(msg.chatId);
+        if (msg.createdAt > lastRead) {
+          counts[msg.chatId] = (counts[msg.chatId] || 0) + 1;
+        }
+      }
+      resolve(counts);
+    };
+    req.onerror = () => reject(req.error);
+  });
+}
+
 export async function clearChatMessages(chatId: string): Promise<void> {
   const db = await openDB();
   return new Promise((resolve, reject) => {

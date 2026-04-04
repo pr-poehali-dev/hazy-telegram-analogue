@@ -5,6 +5,7 @@ import { sendEnvelope, fetchEnvelopes, ackEnvelopes } from "@/lib/push";
 import {
   getChatMessages,
   saveMessage,
+  markChatRead,
   type LocalMessage,
 } from "@/lib/messageStore";
 import {
@@ -70,8 +71,9 @@ export default function Conversation({
     if (msgIdsRef.current.has(msg.id)) return;
     msgIdsRef.current.add(msg.id);
     saveMessage(msg).catch(() => {});
+    markChatRead(roomCode);
     setMessages((prev) => [...prev, msg]);
-  }, []);
+  }, [roomCode]);
 
   useEffect(() => {
     (async () => {
@@ -94,6 +96,7 @@ export default function Conversation({
         for (const m of decrypted) saveMessage(m).catch(() => {});
       }
       setMessages(msgs);
+      markChatRead(roomCode);
       setTimeout(scrollToBottom, 100);
     })();
   }, [roomCode, remotePeerId, scrollToBottom]);

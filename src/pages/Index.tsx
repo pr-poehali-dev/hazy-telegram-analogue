@@ -175,6 +175,7 @@ export default function Index() {
     <Shell>
       {view === "home" && (
         <HomeScreen
+          myPeerId={identity?.peerId || ""}
           onNewChat={handleNewChat}
           onOpenChat={handleOpenChat}
           onSettings={() => setView("profile")}

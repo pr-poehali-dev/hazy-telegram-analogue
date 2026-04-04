@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import Icon from "@/components/ui/icon";
-import { getChatsWithLastMessage, type LocalMessage } from "@/lib/messageStore";
+import { getChatsWithLastMessage, getUnreadCounts, type LocalMessage } from "@/lib/messageStore";
+import { isEncryptedPayload } from "@/lib/crypto";
 
 export interface SavedChat {
   code: string;
@@ -37,13 +38,20 @@ function formatTime(ts: string): string {
   }
 }
 
+function previewText(msg: LocalMessage): string {
+  if (isEncryptedPayload(msg.text)) return "Зашифрованное сообщение";
+  return msg.text;
+}
+
 interface HomeScreenProps {
+  myPeerId: string;
   onNewChat: () => void;
   onOpenChat: (chat: SavedChat) => void;
   onSettings: () => void;
 }
 
 export default function HomeScreen({
+  myPeerId,
   onNewChat,
   onOpenChat,
   onSettings,
@@ -52,15 +60,18 @@ export default function HomeScreen({
   const [lastMessages, setLastMessages] = useState<
     Record<string, LocalMessage>
   >({});
+  const [unread, setUnread] = useState<Record<string, number>>({});
 
   useEffect(() => {
     setChats(getSavedChats());
     getChatsWithLastMessage().then(setLastMessages).catch(() => {});
-  }, []);
+    if (myPeerId) {
+      getUnreadCounts(myPeerId).then(setUnread).catch(() => {});
+    }
+  }, [myPeerId]);
 
   return (
     <div className="flex flex-col h-full animate-fade-up">
-      {/* Header */}
       <div className="flex items-center justify-between px-5 py-4 shrink-0">
         <h1
           className="text-xl font-bold tracking-tight"
@@ -76,7 +87,6 @@ export default function HomeScreen({
         </button>
       </div>
 
-      {/* Chat list */}
       <div className="flex-1 overflow-y-auto scrollbar-thin px-3">
         {chats.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-center px-6 -mt-12">
@@ -98,6 +108,7 @@ export default function HomeScreen({
           <div className="space-y-1 pb-24">
             {chats.map((chat) => {
               const last = lastMessages[chat.code];
+              const count = unread[chat.code] || 0;
               return (
                 <button
                   key={chat.code}
@@ -117,15 +128,24 @@ export default function HomeScreen({
                       <span className="text-sm font-medium text-foreground truncate">
                         {chat.peerName}
                       </span>
-                      {last && (
-                        <span className="text-[11px] text-muted-foreground shrink-0 ml-2">
-                          {formatTime(last.timestamp)}
+                      <div className="flex items-center gap-2 shrink-0 ml-2">
+                        {last && (
+                          <span className="text-[11px] text-muted-foreground">
+                            {formatTime(last.timestamp)}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between mt-0.5">
+                      <p className="text-xs text-muted-foreground truncate">
+                        {last ? previewText(last) : "Нет сообщений"}
+                      </p>
+                      {count > 0 && (
+                        <span className="shrink-0 ml-2 min-w-[20px] h-5 px-1.5 rounded-full bg-[var(--hazy-amber)] text-[#111] text-[11px] font-semibold flex items-center justify-center">
+                          {count > 99 ? "99+" : count}
                         </span>
                       )}
                     </div>
-                    <p className="text-xs text-muted-foreground truncate mt-0.5">
-                      {last ? last.text : "Нет сообщений"}
-                    </p>
                   </div>
                 </button>
               );
@@ -134,7 +154,6 @@ export default function HomeScreen({
         )}
       </div>
 
-      {/* FAB */}
       <div className="absolute bottom-6 right-6">
         <button
           onClick={onNewChat}
