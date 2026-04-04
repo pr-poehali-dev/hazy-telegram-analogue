@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import Icon from "@/components/ui/icon";
+import { QRCodeSVG } from "qrcode.react";
 import { roomStatus } from "@/lib/api";
 import { getIdentity } from "@/lib/identity";
 
@@ -82,27 +83,24 @@ export default function InviteScreen({
 
       {/* Content */}
       <div className="flex-1 flex flex-col items-center justify-center px-6 -mt-8">
-        {/* Spinner */}
-        <div className="w-16 h-16 rounded-full border-2 border-[var(--hazy-surface)] border-t-[var(--hazy-amber)] animate-spin mb-6" />
+        <div className="rounded-2xl bg-white p-4 mb-5">
+          <QRCodeSVG
+            value={inviteLink}
+            size={180}
+            level="M"
+            bgColor="#ffffff"
+            fgColor="#111111"
+          />
+        </div>
 
         <h3 className="text-base font-semibold text-foreground mb-1">
           Ожидание подключения...
         </h3>
-        <p className="text-xs text-muted-foreground text-center mb-8 max-w-[260px]">
-          Отправьте ссылку-приглашение другу. Когда он её откроет, чат начнётся
-          автоматически.
+        <p className="text-xs text-muted-foreground text-center mb-6 max-w-[260px]">
+          Покажите QR-код или отправьте ссылку. Когда друг откроет её, чат начнётся автоматически.
         </p>
 
-        {/* Invite link block */}
         <div className="w-full max-w-sm space-y-3">
-          <div className="rounded-xl bg-[var(--hazy-surface)] p-3">
-            <p className="text-xs text-muted-foreground mb-2">
-              Ссылка-приглашение:
-            </p>
-            <p className="text-xs text-foreground break-all font-mono leading-relaxed">
-              {inviteLink}
-            </p>
-          </div>
 
           <button
             onClick={handleCopy}
