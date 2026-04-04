@@ -356,8 +356,26 @@ export default function Conversation({
     }
   };
 
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const root = document.getElementById("hazy-chat");
+    if (!root) return;
+    const onResize = () => {
+      root.style.height = `${vv.height}px`;
+      root.style.top = `${vv.offsetTop}px`;
+    };
+    onResize();
+    vv.addEventListener("resize", onResize);
+    vv.addEventListener("scroll", onResize);
+    return () => {
+      vv.removeEventListener("resize", onResize);
+      vv.removeEventListener("scroll", onResize);
+    };
+  }, []);
+
   return (
-    <div className="fixed inset-0 flex flex-col bg-background z-20 animate-fade-up">
+    <div id="hazy-chat" className="fixed left-0 right-0 top-0 flex flex-col bg-background z-20 animate-fade-up" style={{ height: "100dvh" }}>
       <div className="flex items-center gap-3 px-4 py-3 shrink-0 border-b border-border/30 bg-background">
         <button
           onClick={onBack}
