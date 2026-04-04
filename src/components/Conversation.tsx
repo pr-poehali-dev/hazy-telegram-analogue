@@ -17,6 +17,19 @@ import {
   isEncryptedPayload,
 } from "@/lib/crypto";
 
+function TypingDots() {
+  const [dots, setDots] = useState(1);
+  useEffect(() => {
+    const t = setInterval(() => setDots((d) => (d % 3) + 1), 500);
+    return () => clearInterval(t);
+  }, []);
+  return (
+    <span className="text-[11px]" style={{ color: "var(--hazy-amber)" }}>
+      печатает{".".repeat(dots)}<span className="invisible">{".".repeat(3 - dots)}</span>
+    </span>
+  );
+}
+
 function safeTime(ts: string): string {
   if (!ts) return new Date().toLocaleTimeString("ru", { hour: "2-digit", minute: "2-digit" });
   const d = new Date(ts);
@@ -55,12 +68,15 @@ export default function Conversation({
     "connecting" | "connected" | "disconnected"
   >("connecting");
   const [remoteActive, setRemoteActive] = useState(false);
+  const [remoteTyping, setRemoteTyping] = useState(false);
   const connRef = useRef<P2PConnection | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const envelopePollRef = useRef<ReturnType<typeof setInterval>>();
   const reconnectRef = useRef<ReturnType<typeof setTimeout>>();
   const remoteActiveTimer = useRef<ReturnType<typeof setTimeout>>();
+  const remoteTypingTimer = useRef<ReturnType<typeof setTimeout>>();
+  const lastTypingSent = useRef(0);
   const msgIdsRef = useRef<Set<string>>(new Set());
   const myKeysRef = useRef<{ publicKey: string; privateKey: string } | null>(null);
   const [remotePublicKey, setRemotePublicKey] = useState<string | null>(() => getRemotePublicKey(remotePeerId));
@@ -97,8 +113,9 @@ export default function Conversation({
     msgIdsRef.current.add(msg.id);
     saveMessage(msg).catch(() => {});
     markChatRead(roomCode);
+    if (msg.senderId === remotePeerId) setRemoteTyping(false);
     setMessages((prev) => [...prev, msg]);
-  }, [roomCode]);
+  }, [roomCode, remotePeerId]);
 
   useEffect(() => {
     (async () => {
@@ -179,6 +196,11 @@ export default function Conversation({
       },
       (readIds) => {
         markAsRead(readIds);
+      },
+      () => {
+        setRemoteTyping(true);
+        if (remoteTypingTimer.current) clearTimeout(remoteTypingTimer.current);
+        remoteTypingTimer.current = setTimeout(() => setRemoteTyping(false), 3000);
       }
     );
     connRef.current = conn;
@@ -199,6 +221,7 @@ export default function Conversation({
       if (connRef.current) connRef.current.destroy();
       if (reconnectRef.current) clearTimeout(reconnectRef.current);
       if (remoteActiveTimer.current) clearTimeout(remoteActiveTimer.current);
+      if (remoteTypingTimer.current) clearTimeout(remoteTypingTimer.current);
       connRef.current = null;
     };
   }, [setupConnection]);
@@ -330,6 +353,13 @@ export default function Conversation({
     }
   };
 
+  const emitTyping = useCallback(() => {
+    const now = Date.now();
+    if (now - lastTypingSent.current < 2000) return;
+    lastTypingSent.current = now;
+    connRef.current?.sendTyping();
+  }, []);
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -339,8 +369,7 @@ export default function Conversation({
 
   const isOnline = p2pStatus === "connected" || remoteActive;
 
-  const statusColor = isOnline ? "bg-green-500" : "bg-gray-400";
-  const statusLabel = isOnline ? "онлайн" : "оффлайн";
+  const statusColor = remoteTyping ? "bg-[var(--hazy-amber)]" : isOnline ? "bg-green-500" : "bg-gray-400";
 
   const formatTime = (ts: string) => {
     if (!ts) return "";
@@ -393,8 +422,12 @@ export default function Conversation({
         <div className="flex-1 min-w-0">
           <p className="text-sm font-medium text-foreground truncate">{remotePeerName}</p>
           <div className="flex items-center gap-1.5 mt-0.5">
-            <div className={`w-1.5 h-1.5 rounded-full ${statusColor}`} />
-            <span className="text-[11px] text-muted-foreground">{statusLabel}</span>
+            <div className={`w-1.5 h-1.5 rounded-full ${statusColor} ${remoteTyping ? "animate-pulse" : ""}`} />
+            {remoteTyping ? (
+              <TypingDots />
+            ) : (
+              <span className="text-[11px] text-muted-foreground">{isOnline ? "онлайн" : "оффлайн"}</span>
+            )}
           </div>
         </div>
       </div>
@@ -448,7 +481,7 @@ export default function Conversation({
             ref={inputRef}
             type="text"
             value={text}
-            onChange={(e) => setText(e.target.value)}
+            onChange={(e) => { setText(e.target.value); emitTyping(); }}
             onKeyDown={handleKeyDown}
             placeholder="Сообщение..."
             className="flex-1 h-10 rounded-xl bg-[var(--hazy-surface)] border-0 px-4 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-[var(--hazy-amber-dim)]"

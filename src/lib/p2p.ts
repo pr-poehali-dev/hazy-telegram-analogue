@@ -56,6 +56,7 @@ type MessageHandler = (data: MsgData) => void;
 type KeyHandler = (publicKey: string) => void;
 type StatusHandler = (status: "connecting" | "connected" | "disconnected") => void;
 type ReadAckHandler = (ids: string[]) => void;
+type TypingHandler = () => void;
 
 export class P2PConnection {
   private pc: RTCPeerConnection | null = null;
@@ -67,6 +68,7 @@ export class P2PConnection {
   private onKey: KeyHandler;
   private onStatus: StatusHandler;
   private onReadAck: ReadAckHandler;
+  private onTyping: TypingHandler;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private _connected = false;
   private myPublicKey: string | null = null;
@@ -76,7 +78,7 @@ export class P2PConnection {
   private maxReconnectAttempts = 5;
   private pendingAcks = new Map<string, { resolve: () => void; reject: () => void; timer: ReturnType<typeof setTimeout> }>();
 
-  constructor(roomCode: string, myPeerId: string, remotePeerId: string, onMessage: MessageHandler, onKey: KeyHandler, onStatus: StatusHandler, onReadAck?: ReadAckHandler) {
+  constructor(roomCode: string, myPeerId: string, remotePeerId: string, onMessage: MessageHandler, onKey: KeyHandler, onStatus: StatusHandler, onReadAck?: ReadAckHandler, onTyping?: TypingHandler) {
     this.roomCode = roomCode;
     this.myPeerId = myPeerId;
     this.remotePeerId = remotePeerId;
@@ -84,6 +86,7 @@ export class P2PConnection {
     this.onKey = onKey;
     this.onStatus = onStatus;
     this.onReadAck = onReadAck || (() => {});
+    this.onTyping = onTyping || (() => {});
   }
 
   get connected() { return this._connected; }
@@ -245,6 +248,10 @@ export class P2PConnection {
           this.onReadAck(data.ids);
           return;
         }
+        if (data.type === "typing") {
+          this.onTyping();
+          return;
+        }
         if (data.type === "key_exchange" && data.publicKey) {
           this.onKey(data.publicKey);
         } else if (data.id && data.senderId) {
@@ -281,6 +288,12 @@ export class P2PConnection {
     if (ids.length === 0) return;
     if (this.dc?.readyState === "open" && this._connected) {
       try { this.dc.send(JSON.stringify({ type: "read_ack", ids })); } catch { /* skip */ }
+    }
+  }
+
+  sendTyping() {
+    if (this.dc?.readyState === "open" && this._connected) {
+      try { this.dc.send(JSON.stringify({ type: "typing" })); } catch { /* skip */ }
     }
   }
 
