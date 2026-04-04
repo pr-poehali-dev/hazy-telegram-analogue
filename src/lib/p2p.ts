@@ -189,14 +189,18 @@ export class P2PConnection {
     this.stopPing();
     this.pingTimer = setInterval(() => {
       if (this.dc?.readyState === "open") {
-        this.dc.send(JSON.stringify({ type: "ping" }));
-        if (Date.now() - this.lastPong > 8000) {
+        try { this.dc.send(JSON.stringify({ type: "ping" })); } catch { /* skip */ }
+        if (Date.now() - this.lastPong > 20000) {
           this._connected = false;
           this.onStatus("disconnected");
           this.stopPing();
         }
+      } else if (this.dc?.readyState === "closed") {
+        this._connected = false;
+        this.onStatus("disconnected");
+        this.stopPing();
       }
-    }, 3000);
+    }, 5000);
   }
 
   private stopPing() {

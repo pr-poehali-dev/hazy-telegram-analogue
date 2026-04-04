@@ -68,14 +68,13 @@
   }
   body {
     @apply bg-background text-foreground font-sans antialiased;
-    position: fixed;
-    width: 100%;
+    overflow: hidden;
+    overscroll-behavior: none;
     -webkit-text-size-adjust: 100%;
   }
   input,
   textarea {
     font-size: 16px !important;
-    touch-action: manipulation;
   }
 }
 
