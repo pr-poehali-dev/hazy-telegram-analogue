@@ -354,20 +354,11 @@ export default function Conversation({
       </div>
 
       <div className="flex-1 overflow-y-auto scrollbar-thin px-4 py-3">
-        {messages.length === 0 && p2pStatus === "connected" && (
+        {messages.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full text-center -mt-8">
             <Icon name="Lock" size={20} className="text-muted-foreground mb-2" />
             <p className="text-xs text-muted-foreground max-w-[220px]">
-              Сообщения передаются напрямую и хранятся только на ваших устройствах
-            </p>
-          </div>
-        )}
-
-        {messages.length === 0 && p2pStatus !== "connected" && (
-          <div className="flex flex-col items-center justify-center h-full text-center -mt-8">
-            <div className="w-10 h-10 rounded-full border-2 border-[var(--hazy-surface)] border-t-[var(--hazy-amber)] animate-spin mb-4" />
-            <p className="text-xs text-muted-foreground">
-              {p2pStatus === "connecting" ? "Устанавливаем P2P соединение..." : "Переподключение..."}
+              Сообщения хранятся только на ваших устройствах
             </p>
           </div>
         )}
