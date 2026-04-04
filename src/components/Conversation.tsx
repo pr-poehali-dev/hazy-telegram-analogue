@@ -384,9 +384,9 @@ export default function Conversation({
                       {formatTime(msg.timestamp)}
                     </p>
                     {isMine && (
-                      <span className={`text-[10px] leading-none ${msg.status === "read" ? "text-[var(--hazy-amber)]" : "text-muted-foreground/40"}`}>
-                        {msg.status === "read" ? "✓✓" : "✓"}
-                      </span>
+                      msg.status === "read"
+                        ? <Icon name="CheckCheck" size={14} className="text-[var(--hazy-amber)]" />
+                        : <Icon name="Check" size={14} className="text-muted-foreground/40" />
                     )}
                   </div>
                 </div>
