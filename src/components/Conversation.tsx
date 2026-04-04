@@ -7,6 +7,14 @@ import {
   saveMessage,
   type LocalMessage,
 } from "@/lib/messageStore";
+import {
+  initKeyPair,
+  saveRemotePublicKey,
+  getRemotePublicKey,
+  encryptMessage,
+  decryptMessage,
+  isEncryptedPayload,
+} from "@/lib/crypto";
 
 interface ConversationProps {
   roomCode: string;
@@ -38,6 +46,8 @@ export default function Conversation({
   const envelopePollRef = useRef<ReturnType<typeof setInterval>>();
   const reconnectRef = useRef<ReturnType<typeof setTimeout>>();
   const msgIdsRef = useRef<Set<string>>(new Set());
+  const myKeysRef = useRef<{ publicKey: string; privateKey: string } | null>(null);
+  const [remotePublicKey, setRemotePublicKey] = useState<string | null>(() => getRemotePublicKey(remotePeerId));
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -56,6 +66,7 @@ export default function Conversation({
       setMessages(msgs);
       setTimeout(scrollToBottom, 100);
     });
+    initKeyPair().then((kp) => { myKeysRef.current = kp; });
   }, [roomCode, scrollToBottom]);
 
   const setupConnection = useCallback(() => {
@@ -80,6 +91,10 @@ export default function Conversation({
           deliveredVia: "p2p",
         });
       },
+      (pubKey) => {
+        saveRemotePublicKey(remotePeerId, pubKey);
+        setRemotePublicKey(pubKey);
+      },
       (status) => {
         setP2pStatus(status);
         if (status === "disconnected") {
@@ -91,6 +106,9 @@ export default function Conversation({
       }
     );
     connRef.current = conn;
+    if (myKeysRef.current) {
+      conn.setMyPublicKey(myKeysRef.current.publicKey);
+    }
     if (role === "creator") {
       conn.initiate();
     } else {
@@ -113,18 +131,26 @@ export default function Conversation({
         const envelopes = await fetchEnvelopes(myPeerId);
         if (envelopes.length === 0) return;
         const ids: string[] = [];
+        const remotePub = getRemotePublicKey(remotePeerId);
+        const myKeys = myKeysRef.current;
         for (const env of envelopes) {
           if (env.room_code !== roomCode) continue;
           ids.push(env.id);
+          let plainText = env.encrypted_body;
+          if (myKeys && remotePub && isEncryptedPayload(env.encrypted_body)) {
+            try {
+              plainText = await decryptMessage(env.encrypted_body, myKeys.privateKey, remotePub);
+            } catch { /* fallback to raw */ }
+          }
           addMessage({
             id: env.id,
             chatId: roomCode,
             senderId: env.from_peer_id,
             senderName: env.from_name,
-            text: env.encrypted_body,
+            text: plainText,
             timestamp: new Date(env.created_at).toLocaleTimeString("ru", { hour: "2-digit", minute: "2-digit" }),
             createdAt: new Date(env.created_at).getTime(),
-            isEncrypted: false,
+            isEncrypted: true,
             deliveredVia: "envelope",
           });
         }
@@ -134,7 +160,7 @@ export default function Conversation({
     checkEnvelopes();
     envelopePollRef.current = setInterval(checkEnvelopes, 4000);
     return () => clearInterval(envelopePollRef.current);
-  }, [roomCode, myPeerId, addMessage]);
+  }, [roomCode, myPeerId, remotePeerId, addMessage, remotePublicKey]);
 
   useEffect(() => {
     scrollToBottom();
@@ -169,8 +195,15 @@ export default function Conversation({
 
     if (!sentP2P) {
       localMsg.deliveredVia = "envelope";
+      localMsg.isEncrypted = true;
       try {
-        await sendEnvelope(myPeerId, myName, remotePeerId, roomCode, trimmed);
+        let body = trimmed;
+        const remotePub = getRemotePublicKey(remotePeerId);
+        const myKeys = myKeysRef.current;
+        if (myKeys && remotePub) {
+          body = await encryptMessage(trimmed, myKeys.privateKey, remotePub);
+        }
+        await sendEnvelope(myPeerId, myName, remotePeerId, roomCode, body);
       } catch {
         return;
       }

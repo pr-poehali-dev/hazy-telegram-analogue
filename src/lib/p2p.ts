@@ -49,7 +49,9 @@ const ICE_SERVERS = [
 ];
 
 type MsgData = { id: string; text: string; senderId: string; senderName: string; timestamp: string };
+type KeyExchangeData = { type: "key_exchange"; publicKey: string };
 type MessageHandler = (data: MsgData) => void;
+type KeyHandler = (publicKey: string) => void;
 type StatusHandler = (status: "connecting" | "connected" | "disconnected") => void;
 
 export class P2PConnection {
@@ -59,15 +61,18 @@ export class P2PConnection {
   private myPeerId: string;
   private remotePeerId: string;
   private onMessage: MessageHandler;
+  private onKey: KeyHandler;
   private onStatus: StatusHandler;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private _connected = false;
+  private myPublicKey: string | null = null;
 
-  constructor(roomCode: string, myPeerId: string, remotePeerId: string, onMessage: MessageHandler, onStatus: StatusHandler) {
+  constructor(roomCode: string, myPeerId: string, remotePeerId: string, onMessage: MessageHandler, onKey: KeyHandler, onStatus: StatusHandler) {
     this.roomCode = roomCode;
     this.myPeerId = myPeerId;
     this.remotePeerId = remotePeerId;
     this.onMessage = onMessage;
+    this.onKey = onKey;
     this.onStatus = onStatus;
   }
 
@@ -109,10 +114,32 @@ export class P2PConnection {
     this.startPolling();
   }
 
+  setMyPublicKey(key: string) {
+    this.myPublicKey = key;
+    if (this._connected && this.dc?.readyState === "open") {
+      this.dc.send(JSON.stringify({ type: "key_exchange", publicKey: key } as KeyExchangeData));
+    }
+  }
+
   private setupDC(dc: RTCDataChannel) {
-    dc.onopen = () => { this._connected = true; this.onStatus("connected"); };
+    dc.onopen = () => {
+      this._connected = true;
+      this.onStatus("connected");
+      if (this.myPublicKey) {
+        dc.send(JSON.stringify({ type: "key_exchange", publicKey: this.myPublicKey } as KeyExchangeData));
+      }
+    };
     dc.onclose = () => { this._connected = false; this.onStatus("disconnected"); };
-    dc.onmessage = (e) => { try { this.onMessage(JSON.parse(e.data)); } catch { /* skip */ } };
+    dc.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        if (data.type === "key_exchange" && data.publicKey) {
+          this.onKey(data.publicKey);
+        } else {
+          this.onMessage(data);
+        }
+      } catch { /* skip */ }
+    };
   }
 
   send(msg: MsgData): boolean {
