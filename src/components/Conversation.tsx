@@ -358,7 +358,7 @@ export default function Conversation({
 
   return (
     <div className="flex flex-col h-full animate-fade-up">
-      <div className="flex items-center gap-3 px-4 py-3 shrink-0 border-b border-border/30">
+      <div className="flex items-center gap-3 px-4 py-3 shrink-0 border-b border-border/30 sticky top-0 z-10 bg-background">
         <button
           onClick={onBack}
           className="w-9 h-9 rounded-xl flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-[var(--hazy-surface)] transition-colors"
