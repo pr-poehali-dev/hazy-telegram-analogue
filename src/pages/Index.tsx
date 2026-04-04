@@ -219,7 +219,7 @@ export default function Index() {
 
 function Shell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="h-screen w-screen overflow-hidden bg-background flex items-center justify-center">
+    <div className="h-full w-full overflow-hidden bg-background flex items-center justify-center">
       <div className="w-full h-full max-w-md mx-auto flex flex-col relative md:border-x md:border-border/30">
         {/* Subtle dot pattern */}
         <div

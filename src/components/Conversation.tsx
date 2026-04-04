@@ -166,6 +166,18 @@ export default function Conversation({
     scrollToBottom();
   }, [messages, scrollToBottom]);
 
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const onResize = () => {
+      const offset = window.innerHeight - vv.height;
+      document.documentElement.style.setProperty("--kb-offset", `${offset}px`);
+      setTimeout(scrollToBottom, 50);
+    };
+    vv.addEventListener("resize", onResize);
+    return () => vv.removeEventListener("resize", onResize);
+  }, [scrollToBottom]);
+
   const handleSend = async () => {
     const trimmed = text.trim();
     if (!trimmed) return;
@@ -247,7 +259,7 @@ export default function Conversation({
   };
 
   return (
-    <div className="flex flex-col h-full animate-fade-up">
+    <div className="flex flex-col h-full animate-fade-up" style={{ paddingBottom: "var(--kb-offset, 0px)" }}>
       <div className="flex items-center gap-3 px-4 py-3 shrink-0 border-b border-border/30">
         <button
           onClick={onBack}
