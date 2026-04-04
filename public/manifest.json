@@ -1,0 +1,24 @@
+{
+  "name": "Hazy — P2P Messenger",
+  "short_name": "Hazy",
+  "description": "Анонимный P2P мессенджер с E2E шифрованием",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "theme_color": "#d99e6b",
+  "background_color": "#111114",
+  "icons": [
+    {
+      "src": "https://cdn.poehali.dev/projects/27d3ba04-3876-41b1-8d86-122a33b104b4/files/e59bed71-f54e-4ca1-93df-067c04e1776b.jpg",
+      "sizes": "512x512",
+      "type": "image/jpeg"
+    },
+    {
+      "src": "https://cdn.poehali.dev/projects/27d3ba04-3876-41b1-8d86-122a33b104b4/files/e59bed71-f54e-4ca1-93df-067c04e1776b.jpg",
+      "sizes": "512x512",
+      "type": "image/jpeg",
+      "purpose": "maskable"
+    }
+  ]
+}

@@ -1,7 +1,9 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { hasIdentity, getIdentity } from "@/lib/identity";
 import { createRoom } from "@/lib/api";
+import { registerServiceWorker, fetchEnvelopes, ackEnvelopes, isStandalone, isPushSupported } from "@/lib/push";
+import { saveMessage, type LocalMessage } from "@/lib/messageStore";
 import WelcomeScreen from "@/components/WelcomeScreen";
 import HomeScreen from "@/components/HomeScreen";
 import type { SavedChat } from "@/components/HomeScreen";
@@ -9,6 +11,7 @@ import InviteScreen from "@/components/InviteScreen";
 import JoinScreen from "@/components/JoinScreen";
 import Conversation from "@/components/Conversation";
 import Profile from "@/components/Profile";
+import InstallPrompt from "@/components/InstallPrompt";
 
 type View =
   | "home"
@@ -47,7 +50,47 @@ export default function Index() {
     null
   );
 
+  const [showInstall, setShowInstall] = useState(false);
+
   const identity = getIdentity();
+
+  useEffect(() => {
+    if (!identityReady || !identity) return;
+    registerServiceWorker();
+
+    const checkEnvelopes = async () => {
+      try {
+        const envelopes = await fetchEnvelopes(identity.peerId);
+        if (envelopes.length > 0) {
+          const ids: string[] = [];
+          for (const env of envelopes) {
+            ids.push(env.id);
+            const msg: LocalMessage = {
+              id: env.id,
+              chatId: env.room_code,
+              senderId: env.from_peer_id,
+              senderName: env.from_name,
+              text: env.encrypted_body,
+              timestamp: new Date(env.created_at).toLocaleTimeString("ru", { hour: "2-digit", minute: "2-digit" }),
+              createdAt: new Date(env.created_at).getTime(),
+              isEncrypted: true,
+              deliveredVia: "envelope",
+            };
+            await saveMessage(msg);
+          }
+          await ackEnvelopes(identity.peerId, ids);
+        }
+      } catch { /* ignore */ }
+    };
+    checkEnvelopes();
+    const interval = setInterval(checkEnvelopes, 10000);
+
+    if (!isStandalone() && isPushSupported() && !localStorage.getItem("hazy_install_dismissed")) {
+      setTimeout(() => setShowInstall(true), 3000);
+    }
+
+    return () => clearInterval(interval);
+  }, [identityReady, identity]);
 
   const handleIdentityDone = () => {
     setIdentityReady(true);
@@ -158,6 +201,13 @@ export default function Index() {
       )}
 
       {view === "profile" && <Profile onBack={goHome} />}
+
+      {showInstall && (
+        <InstallPrompt onDismiss={() => {
+          setShowInstall(false);
+          localStorage.setItem("hazy_install_dismissed", "1");
+        }} />
+      )}
     </Shell>
   );
 }
