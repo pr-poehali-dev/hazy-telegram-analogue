@@ -43,9 +43,30 @@ export async function pollSignals(peerId: string, code?: string) {
   return data.signals || [];
 }
 
-const ICE_SERVERS = [
+const ICE_SERVERS: RTCIceServer[] = [
   { urls: "stun:stun.l.google.com:19302" },
   { urls: "stun:stun1.l.google.com:19302" },
+  { urls: "stun:stun.relay.metered.ca:80" },
+  {
+    urls: "turn:global.relay.metered.ca:80",
+    username: "e00e36a4f3e4b743e2b0ecdd",
+    credential: "kMOANa4K/cIDRVaR",
+  },
+  {
+    urls: "turn:global.relay.metered.ca:80?transport=tcp",
+    username: "e00e36a4f3e4b743e2b0ecdd",
+    credential: "kMOANa4K/cIDRVaR",
+  },
+  {
+    urls: "turn:global.relay.metered.ca:443",
+    username: "e00e36a4f3e4b743e2b0ecdd",
+    credential: "kMOANa4K/cIDRVaR",
+  },
+  {
+    urls: "turns:global.relay.metered.ca:443?transport=tcp",
+    username: "e00e36a4f3e4b743e2b0ecdd",
+    credential: "kMOANa4K/cIDRVaR",
+  },
 ];
 
 type MsgData = { id: string; text: string; senderId: string; senderName: string; timestamp: string };
