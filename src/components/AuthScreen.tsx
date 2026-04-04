@@ -1,5 +1,4 @@
 import { useState, useRef } from "react";
-import { QRCodeSVG } from "qrcode.react";
 import Icon from "@/components/ui/icon";
 import { login, register, verify2faSetup, verify2fa } from "@/lib/api";
 
@@ -112,43 +111,64 @@ export default function AuthScreen({ onAuth }: AuthScreenProps) {
 
   if (step === "setup_2fa") {
     return (
-      <div className="h-screen w-screen bg-background flex items-center justify-center px-4">
+      <div className="h-screen w-screen bg-background flex items-center justify-center px-4 py-8 overflow-y-auto">
         <div className="w-full max-w-sm animate-fade-up">
           <div className="text-center mb-6">
             <div className="w-14 h-14 rounded-2xl bg-[var(--hazy-amber-dim)] flex items-center justify-center mx-auto mb-4">
               <Icon name="ShieldCheck" size={28} className="text-[var(--hazy-amber)]" />
             </div>
-            <h2 className="text-lg font-bold mb-1">Настройка 2FA</h2>
+            <h2 className="text-lg font-bold mb-1">Защитите аккаунт</h2>
             <p className="text-xs text-muted-foreground leading-relaxed">
-              Отсканируйте QR-код в приложении для аутентификации
-              <br />(Google Authenticator, Authy, 1Password)
+              Для входа потребуется одноразовый код
             </p>
           </div>
 
-          <div className="flex justify-center mb-5">
-            <div className="p-3 rounded-2xl bg-white">
-              <QRCodeSVG value={totpUri} size={180} level="M" />
-            </div>
+          <div className="space-y-3 mb-5">
+            <SetupStep
+              num="1"
+              title="Установите приложение"
+              desc="Google Authenticator, Authy или 1Password"
+            />
+            <SetupStep
+              num="2"
+              title="Скопируйте ключ и добавьте в приложение"
+              desc="Нажмите «+» → Ввести ключ вручную"
+            />
           </div>
 
           <div className="mb-5">
             <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium mb-2 px-1">
-              Или введите ключ вручную
+              Ваш секретный ключ
             </p>
-            <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-[var(--hazy-surface)]">
-              <code className="flex-1 text-xs font-mono text-[var(--hazy-amber)] break-all select-all">{totpSecret}</code>
-              <button
-                onClick={() => navigator.clipboard.writeText(totpSecret)}
-                className="flex-shrink-0 w-7 h-7 rounded-lg bg-[var(--hazy-surface-hover)] flex items-center justify-center hover:bg-[var(--hazy-surface-active)] transition-colors"
-              >
-                <Icon name="Copy" size={14} className="text-muted-foreground" />
-              </button>
-            </div>
+            <CopyKeyBlock value={totpSecret} />
           </div>
 
+          <details className="mb-5 group">
+            <summary className="text-xs text-muted-foreground cursor-pointer hover:text-foreground transition-colors flex items-center gap-1.5 px-1">
+              <Icon name="QrCode" size={14} />
+              Показать QR-код (для десктопа)
+              <Icon name="ChevronDown" size={12} className="group-open:rotate-180 transition-transform" />
+            </summary>
+            <div className="flex justify-center mt-3">
+              <div className="p-3 rounded-2xl bg-white">
+                <img
+                  src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(totpUri)}`}
+                  alt="QR Code"
+                  width={180}
+                  height={180}
+                  className="rounded-lg"
+                />
+              </div>
+            </div>
+          </details>
+
           <div className="mb-4">
-            <p className="text-xs text-muted-foreground mb-2 px-1">Введите 6-значный код из приложения</p>
-            <div className="flex gap-2 justify-center" onPaste={handleOtpPaste}>
+            <SetupStep
+              num="3"
+              title="Введите код из приложения"
+              desc="6 цифр, которые показывает приложение"
+            />
+            <div className="flex gap-2 justify-center mt-3" onPaste={handleOtpPaste}>
               {otpDigits.map((digit, i) => (
                 <input
                   key={i}
@@ -285,5 +305,45 @@ export default function AuthScreen({ onAuth }: AuthScreenProps) {
         </button>
       </div>
     </div>
+  );
+}
+
+function SetupStep({ num, title, desc }: { num: string; title: string; desc: string }) {
+  return (
+    <div className="flex items-start gap-3 px-1">
+      <div className="w-6 h-6 rounded-full bg-[var(--hazy-amber)] text-[#111] text-xs font-bold flex items-center justify-center flex-shrink-0 mt-0.5">
+        {num}
+      </div>
+      <div>
+        <p className="text-sm font-medium leading-tight">{title}</p>
+        <p className="text-[11px] text-muted-foreground mt-0.5">{desc}</p>
+      </div>
+    </div>
+  );
+}
+
+function CopyKeyBlock({ value }: { value: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(value);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const formatted = value.match(/.{1,4}/g)?.join(" ") || value;
+
+  return (
+    <button
+      onClick={handleCopy}
+      className="w-full flex items-center gap-3 px-4 py-3.5 rounded-xl bg-[var(--hazy-surface)] hover:bg-[var(--hazy-surface-hover)] transition-colors text-left active:scale-[0.98] group"
+    >
+      <code className="flex-1 text-sm font-mono text-[var(--hazy-amber)] tracking-wider select-all break-all leading-relaxed">
+        {formatted}
+      </code>
+      <div className="flex-shrink-0 w-9 h-9 rounded-lg bg-[var(--hazy-amber-dim)] flex items-center justify-center group-hover:bg-[var(--hazy-amber)] group-hover:text-[#111] transition-colors">
+        <Icon name={copied ? "Check" : "Copy"} size={16} className={copied ? "text-[var(--hazy-amber)]" : ""} />
+      </div>
+    </button>
   );
 }
