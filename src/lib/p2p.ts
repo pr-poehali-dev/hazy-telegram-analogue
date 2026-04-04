@@ -12,17 +12,17 @@ async function api(url: string, options: RequestInit = {}) {
   return data;
 }
 
-export async function createRoom(peerId: string, name: string) {
+export async function createRoom(peerId: string, name: string, publicKey?: string) {
   return api(`${ROOMS_URL}?action=create`, {
     method: "POST",
-    body: JSON.stringify({ peer_id: peerId, name }),
+    body: JSON.stringify({ peer_id: peerId, name, public_key: publicKey || "" }),
   });
 }
 
-export async function joinRoom(code: string, peerId: string, name: string) {
+export async function joinRoom(code: string, peerId: string, name: string, publicKey?: string) {
   return api(`${ROOMS_URL}?action=join`, {
     method: "POST",
-    body: JSON.stringify({ code, peer_id: peerId, name }),
+    body: JSON.stringify({ code, peer_id: peerId, name, public_key: publicKey || "" }),
   });
 }
 
@@ -121,18 +121,40 @@ export class P2PConnection {
     }
   }
 
+  private pingTimer: ReturnType<typeof setInterval> | null = null;
+  private lastPong = 0;
+
   private setupDC(dc: RTCDataChannel) {
     dc.onopen = () => {
       this._connected = true;
+      this.lastPong = Date.now();
       this.onStatus("connected");
       if (this.myPublicKey) {
         dc.send(JSON.stringify({ type: "key_exchange", publicKey: this.myPublicKey } as KeyExchangeData));
       }
+      this.startPing();
     };
-    dc.onclose = () => { this._connected = false; this.onStatus("disconnected"); };
+    dc.onclose = () => {
+      this.stopPing();
+      this._connected = false;
+      this.onStatus("disconnected");
+    };
+    dc.onerror = () => {
+      this.stopPing();
+      this._connected = false;
+      this.onStatus("disconnected");
+    };
     dc.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data);
+        if (data.type === "ping") {
+          dc.send(JSON.stringify({ type: "pong" }));
+          return;
+        }
+        if (data.type === "pong") {
+          this.lastPong = Date.now();
+          return;
+        }
         if (data.type === "key_exchange" && data.publicKey) {
           this.onKey(data.publicKey);
         } else {
@@ -142,8 +164,26 @@ export class P2PConnection {
     };
   }
 
+  private startPing() {
+    this.stopPing();
+    this.pingTimer = setInterval(() => {
+      if (this.dc?.readyState === "open") {
+        this.dc.send(JSON.stringify({ type: "ping" }));
+        if (Date.now() - this.lastPong > 8000) {
+          this._connected = false;
+          this.onStatus("disconnected");
+          this.stopPing();
+        }
+      }
+    }, 3000);
+  }
+
+  private stopPing() {
+    if (this.pingTimer) { clearInterval(this.pingTimer); this.pingTimer = null; }
+  }
+
   send(msg: MsgData): boolean {
-    if (this.dc?.readyState === "open") { this.dc.send(JSON.stringify(msg)); return true; }
+    if (this.dc?.readyState === "open" && this._connected) { this.dc.send(JSON.stringify(msg)); return true; }
     return false;
   }
 
@@ -172,6 +212,7 @@ export class P2PConnection {
   }
 
   destroy() {
+    this.stopPing();
     if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = null; }
     this.dc?.close(); this.dc = null;
     this.pc?.close(); this.pc = null;

@@ -16,6 +16,19 @@ import {
   isEncryptedPayload,
 } from "@/lib/crypto";
 
+function safeTime(ts: string): string {
+  if (!ts) return new Date().toLocaleTimeString("ru", { hour: "2-digit", minute: "2-digit" });
+  const d = new Date(ts);
+  if (isNaN(d.getTime())) return new Date().toLocaleTimeString("ru", { hour: "2-digit", minute: "2-digit" });
+  return d.toLocaleTimeString("ru", { hour: "2-digit", minute: "2-digit" });
+}
+
+function safeTs(ts: string): number {
+  if (!ts) return Date.now();
+  const d = new Date(ts);
+  return isNaN(d.getTime()) ? Date.now() : d.getTime();
+}
+
 interface ConversationProps {
   roomCode: string;
   myPeerId: string;
@@ -148,8 +161,8 @@ export default function Conversation({
             senderId: env.from_peer_id,
             senderName: env.from_name,
             text: plainText,
-            timestamp: new Date(env.created_at).toLocaleTimeString("ru", { hour: "2-digit", minute: "2-digit" }),
-            createdAt: new Date(env.created_at).getTime(),
+            timestamp: safeTime(env.created_at),
+            createdAt: safeTs(env.created_at),
             isEncrypted: true,
             deliveredVia: "envelope",
           });
@@ -248,11 +261,14 @@ export default function Conversation({
         : "Через сервер";
 
   const formatTime = (ts: string) => {
+    if (!ts) return "";
     try {
-      return new Date(ts).toLocaleTimeString("ru-RU", {
-        hour: "2-digit",
-        minute: "2-digit",
-      });
+      const d = new Date(ts);
+      if (isNaN(d.getTime())) {
+        if (/^\d{1,2}:\d{2}$/.test(ts)) return ts;
+        return "";
+      }
+      return d.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
     } catch {
       return "";
     }

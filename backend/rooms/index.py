@@ -74,6 +74,7 @@ def handler(event, context):
     if method == 'POST' and action == 'create':
         peer_id = body.get('peer_id', '')
         name = body.get('name', 'Аноним')
+        public_key = body.get('public_key', '')
         if not peer_id:
             return resp(400, {'error': 'peer_id обязателен'})
 
@@ -82,8 +83,8 @@ def handler(event, context):
         try:
             cur = conn.cursor()
             cur.execute(
-                f"INSERT INTO {schema}.rooms (code, creator_peer_id, creator_name, status) "
-                f"VALUES ('{code}', '{peer_id}', '{name}', 'waiting')"
+                f"INSERT INTO {schema}.rooms (code, creator_peer_id, creator_name, creator_public_key, status) "
+                f"VALUES ('{code}', '{peer_id}', '{name}', '{public_key}', 'waiting')"
             )
             conn.commit()
             return resp(201, {'code': code, 'expires_in': 300})
@@ -94,6 +95,7 @@ def handler(event, context):
         code = body.get('code', '').strip().upper()
         peer_id = body.get('peer_id', '')
         name = body.get('name', 'Аноним')
+        public_key = body.get('public_key', '')
         if not code or not peer_id:
             return resp(400, {'error': 'code и peer_id обязательны'})
 
@@ -108,7 +110,7 @@ def handler(event, context):
                 return resp(400, {'error': 'Нельзя присоединиться к своей комнате'})
 
             cur.execute(
-                f"UPDATE {schema}.rooms SET joiner_peer_id = '{peer_id}', joiner_name = '{name}', status = 'paired' "
+                f"UPDATE {schema}.rooms SET joiner_peer_id = '{peer_id}', joiner_name = '{name}', joiner_public_key = '{public_key}', status = 'paired' "
                 f"WHERE code = '{code}'"
             )
             conn.commit()
@@ -116,6 +118,7 @@ def handler(event, context):
                 'code': code,
                 'peer_id': room['creator_peer_id'],
                 'peer_name': room['creator_name'],
+                'peer_public_key': room['creator_public_key'] or '',
                 'role': 'joiner'
             })
         finally:
@@ -141,6 +144,7 @@ def handler(event, context):
                     'status': 'paired',
                     'peer_id': room['joiner_peer_id'],
                     'peer_name': room['joiner_name'],
+                    'peer_public_key': room['joiner_public_key'] or '',
                     'role': 'creator'
                 })
             return resp(200, {'status': room['status']})

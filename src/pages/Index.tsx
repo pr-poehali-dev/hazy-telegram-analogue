@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { hasIdentity, getIdentity } from "@/lib/identity";
 import { createRoom } from "@/lib/api";
+import { initKeyPair, saveRemotePublicKey } from "@/lib/crypto";
 import { registerServiceWorker, fetchEnvelopes, ackEnvelopes, isStandalone, isPushSupported } from "@/lib/push";
 import { saveMessage, type LocalMessage } from "@/lib/messageStore";
 import WelcomeScreen from "@/components/WelcomeScreen";
@@ -72,8 +73,8 @@ export default function Index() {
               senderId: env.from_peer_id,
               senderName: env.from_name,
               text: env.encrypted_body,
-              timestamp: new Date(env.created_at).toLocaleTimeString("ru", { hour: "2-digit", minute: "2-digit" }),
-              createdAt: new Date(env.created_at).getTime(),
+              timestamp: (() => { try { const d = new Date(env.created_at); return isNaN(d.getTime()) ? "" : d.toLocaleTimeString("ru", { hour: "2-digit", minute: "2-digit" }); } catch { return ""; } })(),
+              createdAt: (() => { try { const d = new Date(env.created_at); return isNaN(d.getTime()) ? Date.now() : d.getTime(); } catch { return Date.now(); } })(),
               isEncrypted: true,
               deliveredVia: "envelope",
             };
@@ -103,7 +104,8 @@ export default function Index() {
   const handleNewChat = useCallback(async () => {
     if (!identity) return;
     try {
-      const data = await createRoom(identity.peerId, identity.name);
+      const keys = await initKeyPair();
+      const data = await createRoom(identity.peerId, identity.name, keys.publicKey);
       setRoomCode(data.code);
       setView("invite");
     } catch {
@@ -112,8 +114,9 @@ export default function Index() {
   }, [identity]);
 
   const handlePaired = useCallback(
-    (peerId: string, peerName: string) => {
+    (peerId: string, peerName: string, peerPublicKey?: string) => {
       saveChatToList(roomCode, peerName, peerId);
+      if (peerPublicKey) saveRemotePublicKey(peerId, peerPublicKey);
       setActiveSession({
         roomCode,
         remotePeerId: peerId,
@@ -126,9 +129,10 @@ export default function Index() {
   );
 
   const handleJoined = useCallback(
-    (remotePeerId: string, remotePeerName: string) => {
+    (remotePeerId: string, remotePeerName: string, peerPublicKey?: string) => {
       const code = urlCode || roomCode;
       saveChatToList(code, remotePeerName, remotePeerId);
+      if (peerPublicKey) saveRemotePublicKey(remotePeerId, peerPublicKey);
       setActiveSession({
         roomCode: code,
         remotePeerId,

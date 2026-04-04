@@ -5,7 +5,7 @@ import { getIdentity } from "@/lib/identity";
 
 interface InviteScreenProps {
   roomCode: string;
-  onPaired: (peerId: string, peerName: string) => void;
+  onPaired: (peerId: string, peerName: string, peerPublicKey?: string) => void;
   onBack: () => void;
 }
 
@@ -27,7 +27,7 @@ export default function InviteScreen({
       const data = await roomStatus(roomCode, identity.peerId);
       if (data.status === "paired" && data.peer_id) {
         if (pollRef.current) clearInterval(pollRef.current);
-        onPaired(data.peer_id, data.peer_name);
+        onPaired(data.peer_id, data.peer_name, data.peer_public_key);
       }
     } catch {
       // room may have expired

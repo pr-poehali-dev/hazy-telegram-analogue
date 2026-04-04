@@ -2,10 +2,11 @@ import { useState, useEffect, useRef } from "react";
 import Icon from "@/components/ui/icon";
 import { joinRoom } from "@/lib/api";
 import { getIdentity } from "@/lib/identity";
+import { initKeyPair } from "@/lib/crypto";
 
 interface JoinScreenProps {
   code: string;
-  onJoined: (remotePeerId: string, remotePeerName: string) => void;
+  onJoined: (remotePeerId: string, remotePeerName: string, peerPublicKey?: string) => void;
   onBack: () => void;
 }
 
@@ -25,21 +26,21 @@ export default function JoinScreen({ code, onJoined, onBack }: JoinScreenProps) 
       return;
     }
 
-    joinRoom(code, identity.peerId, identity.name)
-      .then((data) => {
-        if (data.peer_id && data.peer_name) {
-          onJoined(data.peer_id, data.peer_name);
-        } else {
+    initKeyPair().then((keys) => {
+      joinRoom(code, identity.peerId, identity.name, keys.publicKey)
+        .then((data) => {
+          if (data.peer_id && data.peer_name) {
+            onJoined(data.peer_id, data.peer_name, data.peer_public_key);
+          } else {
+            setStatus("error");
+            setErrorMsg("Не удалось найти собеседника");
+          }
+        })
+        .catch((err) => {
           setStatus("error");
-          setErrorMsg("Не удалось найти собеседника");
-        }
-      })
-      .catch((err) => {
-        setStatus("error");
-        setErrorMsg(
-          err?.message || "Комната не найдена или ссылка устарела"
-        );
-      });
+          setErrorMsg(err?.message || "Комната не найдена или ссылка устарела");
+        });
+    });
   }, [code, onJoined]);
 
   return (
