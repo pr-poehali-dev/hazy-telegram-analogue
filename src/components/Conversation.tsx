@@ -91,13 +91,21 @@ export default function Conversation({
       roomCode,
       myPeerId,
       remotePeerId,
-      (data) => {
+      async (data) => {
+        let plainText = data.text;
+        const remotePub = getRemotePublicKey(remotePeerId);
+        const myKeys = myKeysRef.current;
+        if (myKeys && remotePub && isEncryptedPayload(data.text)) {
+          try {
+            plainText = await decryptMessage(data.text, myKeys.privateKey, remotePub);
+          } catch { /* fallback */ }
+        }
         addMessage({
           id: data.id,
           chatId: roomCode,
           senderId: data.senderId,
           senderName: data.senderName,
-          text: data.text,
+          text: plainText,
           timestamp: data.timestamp,
           createdAt: Date.now(),
           isEncrypted: false,
@@ -348,7 +356,7 @@ export default function Conversation({
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={p2pStatus === "connected" ? "Сообщение..." : "Сообщение (через сервер)..."}
+            placeholder="Сообщение..."
             className="flex-1 h-10 rounded-xl bg-[var(--hazy-surface)] border-0 px-4 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-[var(--hazy-amber-dim)]"
           />
           <button
