@@ -74,13 +74,29 @@ export default function Conversation({
   }, []);
 
   useEffect(() => {
-    getChatMessages(roomCode).then((msgs) => {
-      msgs.forEach((m) => msgIdsRef.current.add(m.id));
+    (async () => {
+      const kp = await initKeyPair();
+      myKeysRef.current = kp;
+      const msgs = await getChatMessages(roomCode);
+      const remotePub = getRemotePublicKey(remotePeerId);
+      const decrypted: LocalMessage[] = [];
+      for (const m of msgs) {
+        msgIdsRef.current.add(m.id);
+        if (remotePub && isEncryptedPayload(m.text)) {
+          try {
+            const plain = await decryptMessage(m.text, kp.privateKey, remotePub);
+            m.text = plain;
+            decrypted.push(m);
+          } catch { /* keep as is */ }
+        }
+      }
+      if (decrypted.length > 0) {
+        for (const m of decrypted) saveMessage(m).catch(() => {});
+      }
       setMessages(msgs);
       setTimeout(scrollToBottom, 100);
-    });
-    initKeyPair().then((kp) => { myKeysRef.current = kp; });
-  }, [roomCode, scrollToBottom]);
+    })();
+  }, [roomCode, remotePeerId, scrollToBottom]);
 
   const setupConnection = useCallback(() => {
     if (connRef.current) {
@@ -151,18 +167,23 @@ export default function Conversation({
       try {
         const envelopes = await fetchEnvelopes(myPeerId);
         if (envelopes.length === 0) return;
-        const ids: string[] = [];
+        const ackIds: string[] = [];
         const remotePub = getRemotePublicKey(remotePeerId);
         const myKeys = myKeysRef.current;
         for (const env of envelopes) {
           if (env.room_code !== roomCode) continue;
-          ids.push(env.id);
           let plainText = env.encrypted_body;
-          if (myKeys && remotePub && isEncryptedPayload(env.encrypted_body)) {
-            try {
-              plainText = await decryptMessage(env.encrypted_body, myKeys.privateKey, remotePub);
-            } catch { /* fallback to raw */ }
+          let decrypted = false;
+          if (isEncryptedPayload(env.encrypted_body)) {
+            if (myKeys && remotePub) {
+              try {
+                plainText = await decryptMessage(env.encrypted_body, myKeys.privateKey, remotePub);
+                decrypted = true;
+              } catch { /* can't decrypt yet, don't ack */ }
+            }
+            if (!decrypted) continue;
           }
+          ackIds.push(env.id);
           addMessage({
             id: env.id,
             chatId: roomCode,
@@ -175,7 +196,7 @@ export default function Conversation({
             deliveredVia: "envelope",
           });
         }
-        if (ids.length > 0) await ackEnvelopes(myPeerId, ids);
+        if (ackIds.length > 0) await ackEnvelopes(myPeerId, ackIds);
       } catch { /* skip */ }
     };
     checkEnvelopes();
