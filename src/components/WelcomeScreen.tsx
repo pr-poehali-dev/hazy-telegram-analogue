@@ -32,7 +32,7 @@ export default function WelcomeScreen({ onDone }: WelcomeScreenProps) {
       <h1
         className="text-3xl font-bold tracking-tight mb-1"
         style={{ color: "var(--hazy-amber)" }}
-      >mazy</h1>
+      >jazy</h1>
 
       <p className="text-sm text-muted-foreground mb-10 text-center">
         Анонимный P2P мессенджер
